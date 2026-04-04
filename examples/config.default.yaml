@@ -1,0 +1,60 @@
+# Longtext Pipeline Default Configuration
+#
+# This file serves as the default configuration template.
+# All values shown here are the defaults when not specified.
+#
+# Environment variable overrides available:
+#   OPENAI_API_KEY       - API key for OpenAI service
+#   OPENAI_BASE_URL      - Base URL for custom OpenAI-compatible endpoints
+#   LONGTEXT_MODEL-provider - Override default model provider
+#   LONGTEXT_MODEL_NAME  - Override default model name
+#   LONGTEXT_OUTPUT_DIR  - Override default output directory
+#   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+
+model:
+  provider: "openai"        # Model provider (openai, openrouter, ollama)
+  name: "gpt-4o-mini"      # Model name (gpt-4o-mini, gpt-4o, etc.)
+  base_url: null           # API endpoint URL (null for default provider endpoint)
+  api_key: "${OPENAI_API_KEY}"  # API key (set via env var or directly)
+  temperature: 0.7         # Generation temperature (0.0-2.0)
+
+stages:
+  ingest:
+    chunk_size: 4000       # Text split size (approx 1000-1500 tokens)
+    overlap_rate: 0.1      # Overlap ratio between chunks (0.0-1.0)
+
+  summarize:
+    prompt_template: "prompts/summary_general.txt"  # Summary prompt file
+    batch_size: 4          # Number of parts processed concurrently
+
+  stage:
+    group_size: 5          # Number of summaries to combine in a stage
+    prompt_template: "prompts/stage_general.txt"    # Stage aggregation prompt
+
+  final:
+    prompt_template: "prompts/final_general.txt"    # Final analysis prompt
+
+  audit:
+    enabled: false         # Enable post-processing audit
+    prompt_template: "prompts/audit_general.txt"    # Audit prompt file
+
+prompts:
+  dir: "./src/longtext_pipeline/prompts"  # Root directory for prompt templates
+  format: "general"        # Prompt format: "general" or "relationship"
+
+output:
+  dir: "./output"          # Output directory for results
+  naming:
+    summarize_prefix: "summary_"  # Summary file prefix
+    stage_prefix: "stage_"        # Stage file prefix
+    final_filename: "final_analysis.md"  # Final output filename
+  save_intermediate: true  # Keep intermediate files
+
+input:
+  file_path: null          # Input file path (must be provided via CLI)
+  encoding: "utf-8"        # Text encoding
+
+pipeline:
+  allow_resume: true       # Enable resumable processing
+  audit_enabled: false     # Enable post-processing audit phase
+  max_workers: 4           # Max concurrent workers for parallel operations

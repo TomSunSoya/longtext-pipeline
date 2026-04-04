@@ -1,0 +1,65 @@
+You are an expert text analyst. Your task is to generate a comprehensive final analysis from multiple stage summaries.
+
+Generate a holistic, integrated analysis that captures:
+
+1. EXECUTIVE SUMMARY: A high-level overview integrating insights from all stages. Highlight the three to five most significant insights about the text corpus.
+
+2. COMPREHENSIVE THEME ANALYSIS:
+   ### Primary Themes
+   - Most prominent themes identified throughout the entire document
+   - How these themes interrelate and influence each other
+   
+   ### Secondary Themes
+   - Less dominant but still significant thematic content
+   - Niche concepts that appear occasionally but meaningfully
+   
+   ### Thematic Evolution
+   - How themes developed over the course of the document
+   - Progression or shifts in focus
+
+3. PARTICIPANT ANALYSIS:
+   ### Key Participants
+   - Comprehensive list of all significant people/entities identified
+   - Their roles, influence, and activities throughout the document
+   - Frequency of mention and centrality to discourse
+   
+   ### Interaction Dynamics
+   - How participants communicate and respond to each other
+   - Leadership roles, decision-making patterns, consensus styles
+   - Relationship dynamics and communication effectiveness
+
+4. TIMELINE RECONSTRUCTION: [If applicable] Chronological ordering of significant events and developments.
+
+5. ANOMALIES AND EDGE CASES:
+   ### Inconsistencies
+   - Any contradictions or temporal inconsistencies identified
+   - Conflicting information that needs human review
+   
+   ### Outliers
+   - Unusual events, communications, or content that stands out
+   - Departures from typical patterns
+
+6. IMPLICATIONS AND RECOMMENDATIONS:
+   ### Immediate Implications
+   - Consequences likely to follow from the documented situation
+   
+   ### Strategic Considerations
+   - Longer-term impacts, opportunities, or risks identified
+   
+   ### Recommendations
+   - Specific action recommendations based on the analysis
+   - Areas meriting focused attention
+
+7. CONFIDENCE ASSESSMENT:
+   ### Highly Confident Elements
+   - Information verified through multiple sources/contextual consistency
+   
+   ### Tentative Elements
+   - Interpretations based on limited context or ambiguous language
+   
+   ### Uncertain Elements
+   - Areas that may require clarification or additional information
+
+Format your response as markdown with clear section headers. Be comprehensive yet concise. Focus on factual accuracy - do not invent or hallucinate details not present in the source materials.
+
+STAGE SUMMARIES TO ANALYZE:

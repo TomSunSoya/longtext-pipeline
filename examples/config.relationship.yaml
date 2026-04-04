@@ -1,0 +1,214 @@
+# Longtext Pipeline - Relationship Analysis Configuration (EXPERIMENTAL)
+#
+# ⚠️  EXPERIMENTAL FUNCTIONALITY
+# This configuration is designed for entity relationship mapping and
+# connection-focused analysis. Use with caution and verify outputs carefully.
+#
+# This configuration differs from general analysis by:
+#   - Focused on entity extraction and relationship mapping
+#   - Optimized prompts for connection discovery
+#   - Network/cluster-oriented final synthesis
+#
+# Usage:
+#   longtext run <input-file> --config examples/config.relationship.yaml
+#
+# Environment variable overrides available:
+#   OPENAI_API_KEY       - API key for OpenAI service (recommended: set via env)
+#   OPENAI_BASE_URL      - Base URL for custom OpenAI-compatible endpoints
+#   LONGTEXT_MODEL_PROVIDER - Override default model provider
+#   LONGTEXT_MODEL_NAME  - Override default model name
+#   LONGTEXT_OUTPUT_DIR  - Override default output directory
+#   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+# Relationship analysis may benefit from higher-quality models due to
+# the nuanced nature of entity extraction and relationship inference.
+# Consider using gpt-4o instead of gpt-4o-mini for complex relationship graphs.
+model:
+  # Model provider. Supported: "openai", "openrouter", "ollama", etc.
+  provider: "openai"
+
+  # Model name/identifier.
+  # For relationship analysis, gpt-4o is recommended for better entity
+  # disambiguation and relationship inference quality.
+  name: "gpt-4o"
+
+  # API endpoint URL. Set to null to use provider default.
+  base_url: null
+
+  # API key for authentication. Use environment variable for security.
+  api_key: "${OPENAI_API_KEY}"
+
+  # Generation temperature.
+  # Relationship analysis uses slightly lower temperature (0.5) than
+  # general analysis to ensure more consistent entity naming and
+  # relationship inference.
+  temperature: 0.5
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+# Stages optimized for relationship-focused processing.
+stages:
+  # -------------------------------------------------------------------------
+  # INGEST STAGE
+  # -------------------------------------------------------------------------
+  # Relationship analysis may benefit from smaller chunks to ensure
+  # entity contexts are not split across chunk boundaries.
+  ingest:
+    # Slightly smaller chunk size than general analysis to preserve
+    # entity context within individual chunks.
+    chunk_size: 3500
+
+    # Overlap ratio between chunks.
+    # Higher overlap (0.15) helps capture relationships that span
+    # chunk boundaries.
+    overlap_rate: 0.15
+
+  # -------------------------------------------------------------------------
+  # SUMMARIZE STAGE
+  # -------------------------------------------------------------------------
+  # Extracts entities and relationships from each chunk.
+  summarize:
+    # Relationship-focused summary prompt template.
+    # This template emphasizes entity extraction and relationship identification
+    # rather than general summarization.
+    prompt_template: "prompts/summary_relationship.txt"
+
+    # Batch size for parallel processing.
+    # Kept conservative (4) as relationship extraction is more complex.
+    batch_size: 4
+
+  # -------------------------------------------------------------------------
+  # STAGE (AGGREGATION)
+  # -------------------------------------------------------------------------
+  # Combines relationship data from multiple summaries into clusters.
+  stage:
+    # Number of summaries to combine into a single stage file.
+    # Slightly smaller group size than general analysis to preserve
+    # relationship granularity.
+    group_size: 4
+
+    # Relationship-focused stage aggregation prompt.
+    # Clusters related entities and identifies cross-chapter relationships.
+    prompt_template: "prompts/stage_relationship.txt"
+
+  # -------------------------------------------------------------------------
+  # FINAL STAGE
+  # -------------------------------------------------------------------------
+  # Synthesizes all relationship data into a comprehensive network analysis.
+  final:
+    # Relationship-focused final analysis prompt.
+    # Produces entity network maps, cluster analysis, and key relationship
+    # identification.
+    prompt_template: "prompts/final_relationship.txt"
+
+  # -------------------------------------------------------------------------
+  # AUDIT STAGE (OPTIONAL)
+  # -------------------------------------------------------------------------
+  # Quality check for relationship hallucinations and false connections.
+  audit:
+    # Enable audit stage (recommended for relationship analysis due to
+    # higher risk of spurious relationship inference).
+    enabled: false
+
+    # Relationship-focused audit prompt.
+    # Specifically checks for:
+    #   - Fabricated entity connections
+    #   - Misattributed relationships
+    #   - Timeline inconsistencies in relationship development
+    prompt_template: "prompts/audit_relationship.txt"
+
+# =============================================================================
+# PROMPTS CONFIGURATION
+# =============================================================================
+prompts:
+  # Root directory for prompt templates.
+  dir: "./src/longtext_pipeline/prompts"
+
+  # Prompt format set to "relationship" for entity-relation focused analysis.
+  # This selects the relationship variants of all prompt templates.
+  format: "relationship"
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+output:
+  # Output directory. Consider using a distinct directory for relationship
+  # analysis to avoid mixing with general analysis outputs.
+  dir: "./output"
+
+  # File naming conventions.
+  naming:
+    # Prefix for relationship summary files.
+    summarize_prefix: "summary_"
+
+    # Prefix for relationship stage files.
+    stage_prefix: "stage_"
+
+    # Filename for final relationship analysis.
+    final_filename: "final_relationship_analysis.md"
+
+  # Keep intermediate files for relationship traceability.
+  # Important for auditing entity extraction and relationship inference
+  # at each stage.
+  save_intermediate: true
+
+# =============================================================================
+# INPUT CONFIGURATION
+# =============================================================================
+input:
+  # Path to input file. Supported: .txt, .md (UTF-8)
+  # Relationship analysis works well with:
+  #   - Meeting transcripts (who said what, decision ownership)
+  #   - Chat logs (conversation dynamics, information flow)
+  #   - Project documentation (stakeholder relationships, dependencies)
+  #   - Interview transcripts (perspectives, conflicting accounts)
+  file_path: null
+
+  # Input file encoding.
+  encoding: "utf-8"
+
+# =============================================================================
+# PIPELINE CONFIGURATION
+# =============================================================================
+pipeline:
+  # Enable resumable processing.
+  # Recommended for relationship analysis as processing is longer
+  # and more resource-intensive.
+  allow_resume: true
+
+  # Enable post-processing audit.
+  # RECOMMENDED: true for relationship analysis due to higher
+  # hallucination risk in entity relationship inference.
+  audit_enabled: false
+
+  # Max concurrent workers.
+  # Kept conservative (4) as relationship extraction requires
+  # more careful processing.
+  max_workers: 4
+
+# =============================================================================
+# EXPERIMENTAL FEATURES NOTES
+# =============================================================================
+#
+# Relationship analysis is designed for:
+#   1. Organizational network mapping (who reports to whom, influence patterns)
+#   2. Communication flow analysis (information pathways, gatekeepers)
+#   3. Stakeholder relationship extraction (from project documents)
+#   4. Timeline reconstruction (event sequences, dependencies)
+#   5. Conflict/opportunity identification (tension points, alignments)
+#
+# Best practices:
+#   - Use higher quality models (gpt-4o) for accuracy
+#   - Enable audit stage for validation
+#   - Review intermediate outputs for entity consistency
+#   - Cross-reference with known facts when possible
+#
+# Known limitations:
+#   - May infer spurious relationships from coincidental co-occurrences
+#   - Entity disambiguation challenges with common names/terms
+#   - Temporal relationships require explicit time markers
+#   - Sarcasm/irony may be misinterpreted as literal relationships

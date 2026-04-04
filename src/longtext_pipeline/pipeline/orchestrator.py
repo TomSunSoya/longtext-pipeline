@@ -1,0 +1,807 @@
+"""
+Pipeline orchestrator for the longtext pipeline.
+
+This module provides the LongtextPipeline class which coordinates all stages
+of processing: ingest → summarize → stage → final → audit. The orchestrator 
+handles input validation, configuration loading, manifest management, resume
+capabilities, and error handling with the Continue-with-Partial strategy.
+"""
+
+import os
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+
+from ..config import load_config, merge_env_overrides
+from ..errors import StageFailedError
+from ..errors.continuation import ErrorAggregator, PartialResult
+from ..manifest import ManifestManager, Manifest
+from ..models import FinalAnalysis, Part
+from ..renderer import format_status
+from ..llm.factory import get_llm_client
+from .ingest import IngestStage
+from .summarize import SummarizeStage
+from .stage_synthesis import StageSynthesisStage
+from .final_analysis import FinalAnalysisStage
+from .audit import AuditStage
+
+
+@dataclass
+class PipelineResult:
+    """Result container for pipeline execution with error tracking."""
+    success: bool
+    final_analysis: Optional[FinalAnalysis]
+    errors: List[str]
+
+
+class LongtextPipeline:
+    """
+    Orchestrates all stages of the longtext processing pipeline.
+    
+    The pipeline flows through four main stages:
+    1. Ingest: Load and split input file
+    2. Summarize: Summarize individual parts
+    3. Stage: Synthesize multiple summaries
+    4. Final: Create comprehensive analysis
+    5. Audit: Optional verification of results
+    """
+    
+    def __init__(self):
+        """Initialize the pipeline orchestrator."""
+        self.manifest_manager = ManifestManager()
+        self.error_aggregator = ErrorAggregator()
+        
+    def run(
+        self,
+        input_path: str,
+        config_path: Optional[str] = None,
+        mode: str = "general",
+        resume: bool = False
+    ) -> FinalAnalysis:
+        """
+        Execute the entire processing pipeline from input to final analysis.
+        
+        Args:
+            input_path: Path to input file (supports txt/md)
+            config_path: Optional path to config file (uses defaults if None)
+            mode: Analysis mode ("general" or "relationship")
+            resume: Whether to resume from existing checkpoints
+             
+        Returns:
+            FinalAnalysis object with results and error tracking
+             
+        Raises:
+            Exception: For fatal errors that prevent pipeline execution
+        """
+        # Reset error aggregator for this run
+        self.error_aggregator = ErrorAggregator()
+        all_errors = []
+        
+        try:
+            # 1. Load/validate input file (exists, supported format)
+            input_path = self._validate_input_file(input_path)
+            
+            # 2. Load config from file or use defaults with env overrides
+            config = self._load_and_validate_config(config_path, mode)
+            
+            # 3. Initialize manifest manager
+            manifest_manager = self.manifest_manager
+             
+            # 4. Load or create manifest (with content hash for validation)
+            input_hash = self._get_input_content_hash(input_path)
+            manifest = self._load_or_create_manifest(
+                manifest_manager, input_path, input_hash, resume
+            )
+            
+            # 5. Validate manifest and check completed stages for resume 
+            if resume and manifest:
+                # Verify the input hasn't changed since the previous run
+                current_input_hash = self._get_input_content_hash(input_path)
+                if not self.manifest_manager.should_resume(manifest, current_input_hash):
+                    print("Input file has changed since last run - cannot resume from existing manifest")
+                    # Recreate manifest since it's stale
+                    manifest = self.manifest_manager.create_manifest(input_path, current_input_hash)
+                    self.manifest_manager.save_manifest(manifest)
+                    completed_stages = []
+                    print("Created fresh manifest - will reprocess all stages")
+                else:
+                    completed_stages = self.manifest_manager.get_completed_stages(manifest)
+                    print(f"Resume enabled: previous completed stages: {completed_stages}")
+            else:
+                completed_stages = []
+                print("Not resuming - will process all stages")
+             
+            # Track current stage for error reporting
+            current_stage = None
+            all_summaries = []
+            all_stages = []
+            final_analysis = None
+             
+            try:
+                # 6. Execute stages sequentially:
+                # ingest → summarize → stage_synthesis → final_analysis → audit
+                 
+                # STAGE 1: INGEST
+                current_stage = "ingest"
+                if not resume or "ingest" not in completed_stages:
+                    print(f"Starting {current_stage} stage...")
+                    parts_result = self._execute_stage_with_error_handling(
+                        self._run_ingest_stage, 
+                        [input_path, config, manifest], 
+                        "ingest"
+                    )
+                    
+                    # Handle stage result
+                    if parts_result.success and parts_result.data is not None:
+                        parts = parts_result.data
+                        # Handle warnings if available in result
+                        if parts_result.warnings:
+                            for warning in parts_result.warnings:
+                                self.error_aggregator.add_warning(current_stage, warning)
+                        print(f"Ingest stage completed with {len(parts)} parts")
+                    else:
+                        # Try to continue with partial result if available
+                        if parts_result.data is not None:
+                            parts = parts_result.data
+                            print(f"Ingest stage partially completed with {len(parts)} parts, errors: {parts_result.errors}")
+                            self.error_aggregator.add_errors(current_stage, parts_result.errors)
+                        else:
+                            # No viable data to continue
+                            all_errors.append(f"Ingest stage failed and no partial result available - pipeline cannot continue")
+                            raise Exception("Pipeline cannot continue after critical ingest failure")
+                else:
+                    # Load parts from existing files based on manifest info
+                    parts = self._load_parts_from_existing_files(manifest, input_path)
+                    print(f"Resuming: loaded {len(parts)} parts from existing files")
+                    # Update manifest to ensure stage is marked as complete
+                    self.manifest_manager.update_stage(manifest, "ingest", "successful", 
+                                                     output_file=f"parts directory for {Path(input_path).name}")
+                 
+                # STAGE 2: SUMMARIZE
+                current_stage = "summarize"  
+                if not resume or "summarize" not in completed_stages:
+                    print(f"Starting {current_stage} stage...")
+                    summaries_result = self._execute_stage_with_error_handling(
+                        self._run_summarize_stage, 
+                        [parts, config, manifest, input_hash], 
+                        "summarize"
+                    )
+                    
+                    if summaries_result.success and summaries_result.data is not None:
+                        all_summaries = summaries_result.data
+                        print(f"Summarize stage completed with {len(all_summaries)} summaries")
+                        # Save summaries to files
+                        self._save_summaries_to_files(all_summaries, input_path)
+                    else:
+                        all_summaries = []
+                        if summaries_result.data is not None and len(summaries_result.data) > 0:
+                            # We have partial summaries
+                            all_summaries = summaries_result.data
+                            print(f"Summarize stage partially completed with {len(all_summaries)} summaries, errors: {len(summaries_result.errors)}")
+                        else:
+                            print(f"Summarize stage failed with no valid partial summaries")
+                            
+                        self.error_aggregator.add_errors(current_stage, summaries_result.errors)
+                        # Handle warnings if available in result
+                        if summaries_result.warnings:
+                            for warning in summaries_result.warnings:
+                                self.error_aggregator.add_warning(current_stage, warning)
+                else:
+                    # Load existing summaries
+                    all_summaries = self._load_summaries_from_existing_files(manifest, input_path)
+                    print(f"Resuming: loaded {len(all_summaries)} summaries from existing files")
+                    # Update manifest to ensure stage is marked as complete
+                    self.manifest_manager.update_stage(manifest, "summarize", "successful",
+                                                     output_file=f"summaries directory for {Path(input_path).name}")
+                 
+                # STAGE 3: STAGE SYNTHESIS
+                current_stage = "stage"
+                if not resume or "stage" not in completed_stages:
+                    print(f"Starting {current_stage} stage...")
+                    synthesis_result = self._execute_stage_with_error_handling(
+                        self._run_stage_synthesis_stage,
+                        [all_summaries, config, manifest, input_hash], 
+                        "stage"
+                    )
+                    
+                    if synthesis_result.success and synthesis_result.data is not None:
+                        all_stages = synthesis_result.data
+                        print(f"Stage synthesis completed with {len(all_stages)} stages")
+                        # Save stages to files
+                        self._save_stages_to_files(all_stages, input_path)
+                    else:
+                        all_stages = []
+                        if synthesis_result.data is not None and len(synthesis_result.data) > 0:
+                            # We have partial stages
+                            all_stages = synthesis_result.data
+                            print(f"Stage synthesis partially completed with {len(all_stages)} stages, errors: {len(synthesis_result.errors)}")
+                        else:
+                            print(f"Stage synthesis stage failed with no valid partial stages")
+                            
+                        self.error_aggregator.add_errors(current_stage, synthesis_result.errors)
+                        # Skip warnings since ErrorAggregator only supports errors for now
+                        if synthesis_result.warnings:
+                            for warning in synthesis_result.warnings:
+                                self.error_aggregator.add_warning(current_stage, warning)
+                else:
+                    # Load existing stages
+                    all_stages = self._load_stages_from_existing_files(manifest, input_path)
+                    print(f"Resuming: loaded {len(all_stages)} stages from existing files")
+                    # Update manifest to ensure stage is marked as complete
+                    self.manifest_manager.update_stage(manifest, "stage", "successful",
+                                                     output_file=f"stages directory for {Path(input_path).name}")
+                 
+                # STAGE 4: FINAL ANALYSIS
+                current_stage = "final"
+                if not resume or "final" not in completed_stages:
+                    print(f"Starting {current_stage} stage...")
+                    final_result = self._execute_stage_with_error_handling(
+                        self._run_final_analysis_stage,
+                        [all_stages, config, manifest], 
+                        "final"
+                    )
+                    
+                    if final_result.success and final_result.data is not None:
+                        final_analysis = final_result.data
+                        print("Final analysis stage completed successfully")
+                        # Save final analysis to file
+                        self._save_final_analysis_to_file(final_analysis, input_path)
+                        
+                        # Update manifest final metadata
+                        final_analysis.metadata["completed_at"] = datetime.now().isoformat()
+                        manifest.status = "completed"
+                    else:
+                        # Handle partial/failure case
+                        if final_result.data is not None:
+                            # Use partial result with error info in final analysis
+                            final_analysis = final_result.data
+                            final_analysis.metadata["errors"] = final_result.errors
+                        else:
+                            # Create a partial result structure
+                            final_analysis = FinalAnalysis(
+                                status="partial_success",
+                                stages=all_stages,
+                                final_result="Incomplete: Final analysis stage failed",
+                                metadata={"errors": final_result.errors}
+                            )
+                        
+                        if final_result.errors:
+                            self.error_aggregator.add_errors(current_stage, final_result.errors) 
+                        if final_result.warnings:
+                            self.error_aggregator.add_warnings(current_stage, final_result.warnings)
+                            
+                        # Flag as partial success or failed depending on severity
+                        if final_result.success:
+                            manifest.status = "completed_with_issues"
+                        elif len(getattr(final_analysis, 'stages', [])) > 0:
+                            manifest.status = "partial_success"
+                        else:
+                            manifest.status = "failed"
+                        
+                        print("Final analysis stage encountered errors but pipeline continues")
+                        
+                else:
+                    print("Skipping final stage (already completed)")
+                    final_analysis = self._load_final_analysis_from_file(input_path)
+                    # Update manifest to ensure stage is marked as complete
+                    self.manifest_manager.update_stage(manifest, "final", "successful",
+                                                     output_file=f"final_analysis.md for {Path(input_path).name}")
+                    manifest.status = "completed"
+                 
+                # STAGE 5: AUDIT (conditional)
+                current_stage = "audit" 
+                audit_enabled = config.get("stages", {}).get("audit", {}).get("enabled", False)
+                if audit_enabled and (not resume or "audit" not in completed_stages):
+                    print(f"Starting {current_stage} stage...")
+                    audit_result = self._execute_stage_with_error_handling(
+                        self._run_audit_stage,
+                        [final_analysis, config, manifest], 
+                        "audit"
+                    )
+                    
+                    if audit_result.success and audit_result.data is not None:
+                        print("Audit stage completed successfully")
+                        self.error_aggregator.add_warnings(current_stage, audit_result.warnings or [])
+                    else:
+                        print("Audit stage encountered errors or produced partial results")
+                        if audit_result.errors:
+                            self.error_aggregator.add_errors(current_stage, audit_result.errors)
+                elif audit_enabled and resume and "audit" in completed_stages:
+                    # Audit stage was previously completed
+                    self.manifest_manager.update_stage(manifest, "audit", "successful",
+                                                     output_file=f"audit report for {Path(input_path).name}")
+
+            except Exception as e:
+                error_msg = f"{current_stage} stage failed with error: {str(e)}"
+                error_traceback = traceback.format_exc()
+                all_errors.extend([error_msg, error_traceback])
+                self.error_aggregator.add_errors(current_stage, [str(e), error_traceback])
+                
+                # Update manifest with stage error information
+                try:
+                    self.manifest_manager.update_stage(manifest, current_stage, "failed", error=error_msg)
+                    self.manifest_manager.save_manifest(manifest)
+                except Exception:
+                    pass  # Don't cascade manifest errors
+                 
+                # Continue with partial result if we have data from earlier stages
+                final_analysis = FinalAnalysis(
+                    status="partial_success",
+                    stages=all_stages,
+                    final_result="Pipeline interrupted - partial results available",
+                    metadata={"errors": all_errors, "error_summary": self.error_aggregator.get_full_summary()}
+                )
+        
+        except KeyboardInterrupt:
+            # Handle Ctrl-C interruption gracefully
+            print("\nPipeline interrupted by user")
+            error_msg = "Pipeline interrupted by user"
+            all_errors.append(error_msg)
+            
+            if 'manifest' in locals():
+                try:
+                    self.manifest_manager.update_stage(manifest, 'pipeline', 'failed', error=error_msg)
+                    self.manifest_manager.save_manifest(manifest)  
+                except Exception:
+                    pass
+                    
+            final_analysis = FinalAnalysis(
+                status="interrupted",
+                stages=all_stages,
+                final_result="Pipeline was interrupted by user",
+                metadata={"errors": all_errors}
+            )
+        
+        except Exception as e:
+            # Generic exception handling for critical errors
+            error_msg = f"Critical error during pipeline execution: {str(e)}"
+            error_traceback = traceback.format_exc()
+            all_errors.extend([error_msg, error_traceback])
+            
+            final_analysis = FinalAnalysis(
+                status="failed",
+                stages=[],
+                final_result="Pipeline failed due to critical error",
+                metadata={"errors": all_errors}
+            )
+        
+        finally:
+            # 9. Generate final status report using renderer
+            try:
+                if 'manifest' in locals():
+                    status_report = format_status(manifest, show_details=True)
+                    print(f"\n=== PIPELINE STATUS ===\n{status_report}")
+                    
+                    # Always save the manifest to persist the current state
+                    self.manifest_manager.save_manifest(manifest)
+                    
+                    print(f"Manifest saved: {self.manifest_manager._get_manifest_path(input_path)}")
+            except Exception as e:
+                print(f"Failed to generate/render final status report: {str(e)}")
+        
+        # 10. Return FinalAnalysis or partial result with error tracking
+        final_analysis.metadata["pipeline_errors"] = all_errors
+        return final_analysis
+    
+    def _validate_input_file(self, input_path: str) -> str:
+        """Validate that input file exists and has supported format."""
+        path = Path(input_path).resolve()
+        
+        # Check if file exists
+        if not path.exists():
+            raise FileNotFoundError(f"Input file does not exist: {input_path}")
+        
+        # Check if file is readable
+        if not os.access(path, os.R_OK):
+            raise PermissionError(f"Cannot read input file: {input_path}")
+        
+        # Check extension (only txt/md supported)
+        ext = path.suffix.lower()
+        if ext not in ['.txt', '.md']:
+            raise ValueError(f"Unsupported file format. Only .txt and .md files are supported, got: {ext}")
+        
+        return str(path)
+    
+    def _load_and_validate_config(self, config_path: Optional[str], mode: str) -> dict:
+        """Load and validate configuration with environment overrides."""
+        config = load_config(config_path)
+        
+        # Apply environment variable overrides
+        config = merge_env_overrides(config)
+        
+        # Update prompts based on mode
+        if "prompts" in config and mode == "relationship":
+            config["prompts"]["format"] = "relationship"
+        
+        return config
+    
+    def _get_input_content_hash(self, input_path: str) -> str:
+        """Calculate SHA-256 hash of input file content.""" 
+        from ..utils.hashing import hash_content
+        from ..utils.io import read_file
+        
+        content = read_file(input_path)
+        return hash_content(content)
+    
+    def _load_or_create_manifest(
+        self, 
+        manifest_manager: 'ManifestManager', 
+        input_path: str, 
+        input_hash: str,
+        resume: bool
+    ) -> Manifest:
+        """Load existing manifest if resume is enabled and input hasn't changed, otherwise create new."""
+        if resume:
+            # Try to load existing manifest
+            existing_manifest = manifest_manager.load_manifest(input_path)
+            if existing_manifest:
+                # Validate hash to make sure input hasn't changed since last run
+                if manifest_manager.should_resume(existing_manifest, input_hash):
+                    print("Using existing manifest for resume")
+                    return existing_manifest
+                else:
+                    print("Input file has changed since last run, creating new manifest...")
+        
+        # Create new manifest (either no existing or input changed)
+        manifest = manifest_manager.create_manifest(input_path, input_hash)
+        manifest_manager.save_manifest(manifest)
+        print(f"Created new manifest: {manifest.session_id}")
+        return manifest
+    
+    def _run_ingest_stage(
+        self, 
+        input_path: str, 
+        config: dict, 
+        manifest: Manifest
+    ) -> Optional[List[Part]]:
+        """Run the ingest stage and return parts or None on failure."""
+        try:
+            stage = IngestStage(manifest_manager=self.manifest_manager)
+            result = stage.run(input_path, config, manifest)
+            print(f"Successfully ran ingest stage for {input_path}")
+            return result
+        except Exception as e:
+            error_msg = f"Ingest stage failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            traceback.print_exc()
+            
+            # Update manifest with ingest stage failure
+            try:
+                self.manifest_manager.update_stage(manifest, "ingest", "failed", error=error_msg)
+                self.manifest_manager.save_manifest(manifest)
+            except Exception as manifest_error:
+                print(f"Failed to update manifest: {manifest_error}")
+            
+            return None
+    
+    def _run_summarize_stage(
+        self, 
+        parts: List[Part], 
+        config: dict, 
+        manifest: Manifest,
+        input_hash: str 
+    ) -> Optional[list]:  # Returns list of Summary objects
+        """Run the summarize stage and return summaries or None on failure."""
+        try:
+            # Get LLM client
+            llm_client = get_llm_client(config.get("model", {}))
+            stage = SummarizeStage(llm_client, manifest_manager=self.manifest_manager)
+            
+            result = stage.run(parts, config, manifest, input_hash)
+            print(f"Successfully ran summarize stage for {len(parts)} parts")
+            return result
+        except Exception as e:
+            error_msg = f"Summarize stage failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            traceback.print_exc()
+            
+            # Update manifest with summarize stage failure
+            try:
+                self.manifest_manager.update_stage(manifest, "summarize", "failed", error=error_msg)
+                self.manifest_manager.save_manifest(manifest)
+            except Exception as manifest_error:
+                print(f"Failed to update manifest: {manifest_error}")
+            
+            return None
+    
+    def _run_stage_synthesis_stage(
+        self, 
+        summaries: list,  # List of Summary objects
+        config: dict, 
+        manifest: Manifest,
+        input_hash: str
+    ) -> Optional[list]:  # Returns list of StageSummary objects
+        """Run the stage synthesis stage and return stage summaries or None on failure."""
+        try:
+            # Get LLM client
+            llm_client = get_llm_client(config.get("model", {}))
+            stage = StageSynthesisStage(llm_client, manifest_manager=self.manifest_manager)
+            
+            result = stage.run(summaries, config, manifest, input_hash)
+            print(f"Successfully ran stage synthesis stage for {len(summaries)} summaries")
+            return result
+        except Exception as e:
+            error_msg = f"Stage synthesis stage failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            traceback.print_exc()
+            
+            # Update manifest with stage stage failure
+            try:
+                self.manifest_manager.update_stage(manifest, "stage", "failed", error=error_msg)
+                self.manifest_manager.save_manifest(manifest)
+            except Exception as manifest_error:
+                print(f"Failed to update manifest: {manifest_error}")
+            
+            return None
+    
+    def _run_final_analysis_stage(
+        self, 
+        stages: list,  # List of StageSummary objects
+        config: dict, 
+        manifest: Manifest
+    ) -> Optional[FinalAnalysis]:
+        """Run the final analysis stage and return final analysis or None on failure."""
+        try:
+            # Get LLM client
+            llm_client = get_llm_client(config.get("model", {}))
+            stage = FinalAnalysisStage(llm_client, manifest_manager=self.manifest_manager)
+            
+            result = stage.run(stages, config, manifest)
+            print(f"Successfully ran final analysis stage for {len(stages)} stages")
+            return result
+        except Exception as e:
+            error_msg = f"Final analysis stage failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            traceback.print_exc()
+            
+            # Update manifest with final stage failure
+            try:
+                self.manifest_manager.update_stage(manifest, "final", "failed", error=error_msg)
+                self.manifest_manager.save_manifest(manifest)
+            except Exception as manifest_error:
+                print(f"Failed to update manifest: {manifest_error}")
+            
+            return None
+    
+    def _run_audit_stage(
+        self, 
+        final_analysis: FinalAnalysis,
+        config: dict, 
+        manifest: Manifest
+    ) -> Optional[dict]:  # Returns audit results
+        """Run the audit stage, returns results or None on failure."""
+        try:
+            # Get LLM client
+            llm_client = get_llm_client(config.get("model", {}))
+            stage = AuditStage(llm_client, manifest_manager=self.manifest_manager)
+            
+            result = stage.run(final_analysis, config, manifest)
+            print("Successfully ran audit stage")
+            return result
+        except Exception as e:
+            error_msg = f"Audit stage failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            traceback.print_exc()
+            
+            # Update manifest with audit stage failure
+            try:
+                self.manifest_manager.update_stage(manifest, "audit", "failed", error=error_msg)
+                self.manifest_manager.save_manifest(manifest)
+            except Exception as manifest_error:
+                print(f"Failed to update manifest: {manifest_error}")
+            
+            return None
+    
+    def _load_parts_from_existing_files(self, manifest: Manifest, input_path: str) -> List[Part]:
+        """Load parts from existing part files referenced in manifest."""
+        try:
+            parts_dir = Path(input_path).parent / ".longtext"
+            parts = []
+            
+            i = 0
+            while True:
+                part_path = parts_dir / f"part_{i:02d}.txt"
+                if not part_path.exists():
+                    break
+                
+                # Read the part file and extract content following the format in DATA_MODEL.md
+                content = ""
+                with open(part_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                # Find the content after "---END---" marker
+                content_start = -1
+                for idx, line in enumerate(lines):
+                    if line.strip() == "METADATA_END: ---END---":
+                        content_start = idx + 1
+                        break
+                
+                if content_start != -1 and content_start < len(lines):
+                    # Join all lines from content_start onward
+                    content = "\n".join(lines[content_start:]).strip()
+                
+                if content:
+                    from ..models import Part
+                    parts.append(Part(
+                        index=i,
+                        content=content,
+                        token_count=int(len(content.split()) * 1.2),  # rough estimate
+                        metadata={"source": str(part_path)}
+                    ))
+                
+                i += 1
+            
+            return parts
+        except Exception as e:
+            print(f"Failed to load existing parts: {e}")
+            return []
+    
+    def _load_summaries_from_existing_files(self, manifest: Manifest, input_path: str) -> list:
+        """Load existing summaries from summary files."""
+        try:
+            summaries_dir = Path(input_path).parent / ".longtext" 
+            summaries = []
+            from ..models import Summary  # Import the Summary model from models
+            
+            i = 0
+            while True:
+                summary_path = summaries_dir / f"summary_{i:02d}.md"
+                if not summary_path.exists():
+                    break
+                    
+                # Read the summary file content  
+                with open(summary_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Create a basic summary object that preserves essential data
+                summary_obj = Summary(
+                    part_index=i,
+                    content=content,
+                    key_points=[],    # Would need to extract from content in production if needed
+                    entities_found=[], # Would need to extract from content in production if needed
+                    themes=[],        # Would need to extract from content in production if needed
+                    action_items=[],  # Would need to extract from content in production if needed
+                    additional_notes=[], # Would need to extract from content in production if needed
+                    metadata={"status": "loaded_from_file", "path": str(summary_path)}
+                )
+                summaries.append(summary_obj)
+                i += 1
+            
+            print(f"Loaded {len(summaries)} summaries from existing files")
+            return summaries
+        except Exception as e:
+            print(f"Failed to load existing summaries: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _load_stages_from_existing_files(self, manifest: Manifest, input_path: str) -> list:
+        """Load existing stage summaries from stage files."""
+        try:
+            stages_dir = Path(input_path).parent / ".longtext"
+            stages = []
+            from ..models import Stage as StageSummary  # Import the Stage model
+            
+            i = 0
+            while True:
+                stage_path = stages_dir / f"stage_{i:02d}.md"
+                if not stage_path.exists():
+                    break
+                    
+                # Read the stage file content
+                with open(stage_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Create a basic stage object that preserves essential data
+                stage_obj = StageSummary(
+                    stage_index=i,
+                    content=content,
+                    summary_count=0,  # This would need to be derived from content if essential
+                    executive_summary="",
+                    key_points=[],
+                    entity_synthesis={},
+                    theme_evolution=[],
+                    consistency_checks=[],
+                    action_items_tracking=[],
+                    metadata={"status": "loaded_from_file", "path": str(stage_path)}
+                )
+                stages.append(stage_obj)
+                i += 1
+            
+            print(f"Loaded {len(stages)} stages from existing files")
+            return stages
+        except Exception as e:
+            print(f"Failed to load existing stages: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _load_final_analysis_from_file(self, input_path: str) -> FinalAnalysis:
+        """Load existing final analysis from file."""
+        try:
+            final_path = Path(input_path).parent / ".longtext" / "final_analysis.md"
+            if final_path.exists():
+                from ..utils.io import read_file
+                
+                content = read_file(str(final_path))
+                return FinalAnalysis(
+                    status="completed",
+                    stages=[],  # May need to reload based on context, but this ensures the object builds
+                    final_result=f"Resumed: Loading existing complete analysis from {final_path}\n{content[:200]}...",
+                    metadata={"resumed_from": True, "source_file": str(final_path), "content_preview": content}
+                )
+            return FinalAnalysis(
+                status="not_found",
+                stages=[],
+                final_result="Final analysis file not found for resume",
+                metadata={}
+            )
+        except Exception as e:
+            print(f"Failed to load existing final analysis: {e}")
+            import traceback
+            traceback.print_exc()
+            return FinalAnalysis(
+                status="error",
+                stages=[],
+                final_result="Error loading existing final analysis",
+                metadata={"error": str(e)}
+            )
+            
+    
+    def _save_summaries_to_files(self, summaries: list, input_path: str):
+        """Save summaries to file system."""
+        try:
+            from ..renderer import render_summary
+            parts_dir = Path(input_path).parent / ".longtext"
+            
+            for summary_obj in summaries:
+                summary_path = parts_dir / f"summary_{summary_obj.part_index:02d}.md"
+                try:
+                    rendered_content = render_summary(summary_obj, 
+                        model="gpt-4o-mini")  # Use appropriate model from config
+                    
+                    from ..utils.io import write_file
+                    write_file(str(summary_path), rendered_content)
+                except Exception as e:
+                    print(f"Failed to save summary file {summary_path}: {e}")
+        except Exception as e:
+            print(f"Failed to save summaries: {e}")
+    
+    def _save_stages_to_files(self, stages: list, input_path: str):
+        """Save stages to file system."""
+        try:
+            from ..renderer import render_stage
+            parts_dir = Path(input_path).parent / ".longtext"
+            
+            for stage_obj in stages:
+                stage_path = parts_dir / f"stage_{stage_obj.stage_index:02d}.md"
+                try:
+                    rendered_content = render_stage(stage_obj,
+                        model="gpt-4o-mini")  # Use appropriate model from config
+                    
+                    from ..utils.io import write_file
+                    write_file(str(stage_path), rendered_content)
+                except Exception as e:
+                    print(f"Failed to save stage file {stage_path}: {e}")
+        except Exception as e:
+            print(f"Failed to save stages: {e}")
+    
+    def _save_final_analysis_to_file(self, final_analysis: FinalAnalysis, input_path: str):
+        """Save final analysis to file system."""  
+        try:
+            from ..renderer import render_final
+            parts_dir = Path(input_path).parent / ".longtext"
+            final_path = parts_dir / "final_analysis.md"
+            
+            try:
+                rendered_content = render_final(final_analysis, input_path,
+                    model="gpt-4o-mini")  # Use appropriate model from config
+                
+                from ..utils.io import write_file
+                write_file(str(final_path), rendered_content)
+            except Exception as e:
+                print(f"Failed to save final analysis file {final_path}: {e}")
+        except Exception as e:
+            print(f"Failed to save final analysis: {e}")

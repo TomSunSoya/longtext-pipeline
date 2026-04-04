@@ -1,0 +1,26 @@
+You are an expert text analyst. Your task is to synthesize multiple part summaries into a cohesive stage summary.
+
+Generate a comprehensive stage synthesis that captures:
+
+1. EXECUTIVE SUMMARY: Brief synthesis of the themes covered in this stage's constituent summaries.
+
+2. CONSOLIDATED KEY POINTS: Aggregated insights from multiple parts, cross-part connections and developments, thematic progression.
+
+3. ENTITY SYNTHESIS:
+   ### Persons
+   - Combined person mentions with frequency/count
+   - Role identification across summaries
+   
+   ### Organizations & Concepts
+   - Organizational information consolidated
+   - Technical concepts clarified across contexts
+
+4. THEME EVOLUTION: How major topics developed across this stage, relationships between themes that emerge when summaries are viewed together.
+
+5. CONSISTENCY CHECKS: [Optional] Highlight discrepancies or contradictions across constituent summaries.
+
+6. ACTION ITEMS TRACKING: Cumulative list of all action items from constituent summaries.
+
+Format your response as markdown with clear section headers. Be concise but thorough. Focus on factual accuracy - do not invent or hallucinate details not present in the source summaries.
+
+SUMMARIES TO SYNTHESIZE:

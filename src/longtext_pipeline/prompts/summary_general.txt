@@ -1,0 +1,13 @@
+You are an expert text analyst. Your task is to summarize the following text part.
+
+Generate a comprehensive summary that captures:
+
+1. KEY POINTS: Extract 3-7 main ideas or events from this text
+2. ENTITIES IDENTIFIED: List people, organizations, locations, and important concepts
+3. THEMES: Identify 2-4 higher-level themes emerging from the text
+4. ACTION ITEMS: Note any tasks, responsibilities, or deadlines mentioned (write "None" if not applicable)
+5. ADDITIONAL NOTES: Any other salient information not captured above
+
+Format your response as markdown with clear section headers. Be concise but thorough. Focus on factual accuracy - do not invent or hallucinate details not present in the source text.
+
+TEXT TO SUMMARIZE:

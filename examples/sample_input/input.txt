@@ -1,0 +1,417 @@
+# Project Nexus - Team Communication Log
+## Q4 2025 Development Cycle
+
+---
+
+# SECTION 1: Sprint Planning Meeting - October 2, 2025
+
+**Attendees:** Sarah Chen (PM), Marcus Rodriguez (Tech Lead), Priya Patel (Backend), 
+James Kim (Frontend), Alex Thompson (DevOps), Elena Vasquez (QA), David Park (UX)
+
+---
+
+## 1.1 Opening Remarks - Sarah Chen
+
+Sarah Chen [09:00 AM]: Good morning everyone. Thanks for joining today's sprint planning. 
+Before we dive in, a quick recap on Q4 roadmap. We've completed 73% of Q3 objectives, 
+which puts us in a solid position. Key highlights from last sprint:
+- Backend API performance improvements shipped to staging
+- New authentication flow passed security review
+- User onboarding redesign showing 15% improvement in early testing
+
+However, we have carryover items. Marcus, can you walk us through the technical debt?
+
+Marcus Rodriguez [09:03 AM]: Sure, Sarah. Three main items:
+
+1. **Database Connection Pooling**: Intermittent timeouts under load testing. Current 
+   pool size of 20 connections isn't sufficient at 500+ concurrent users. Priya's team 
+   needs to refactor connection management logic.
+
+2. **Cache Invalidation**: Redis cache layer has a bug where stale data persists after 
+   user updates. Affects profile and settings endpoints primarily.
+
+3. **Log Aggregation**: Distributed tracing is incomplete. Some microservices aren't 
+   propagating correlation IDs properly, making debugging production issues harder.
+
+I'd estimate 3-4 days of focused work. The question is prioritization against new features.
+
+Sarah Chen [09:07 AM]: Thanks Marcus. Elena, QA implications?
+
+Elena Vasquez [09:08 AM]: Cache invalidation is most urgent. Two production incidents 
+last month where users saw outdated information. The profile picture issue generated 
+47 support tickets. I'd prioritize that first.
+
+David Park [09:09 AM]: Adding to that - stale profile data affects our A/B tests. 
+We can't measure the new avatar feature's impact when 30% of users see cached versions. 
+This blocks design decisions for Q4 personalization push.
+
+---
+
+## 1.2 Backend Deep Dive - Priya Patel
+
+Priya Patel [09:12 AM]: More context on connection pooling. Under normal load, fine. 
+But during peak hours (9-11 AM and 2-4 PM EST), response times spike from 150ms to 
+over 800ms. Root cause analysis:
+- Average concurrent connections during peak: 340
+- Current max pool size: 20
+- Connection wait time: 45-120ms per request
+
+I recommend dynamic pool sizing: min 30, max 100 connections, 30 second idle timeout. 
+This should handle up to 800 concurrent users. Implementation involves modifying 
+DatabaseConnectionManager and updating Docker resource limits.
+
+Marcus Rodriguez [09:16 AM]: Solid analysis. If we increase pool to 100 connections, 
+we need to verify the database server can handle that across all instances. How many 
+pods in production?
+
+Alex Thompson [09:17 AM]: 12 pods, each running 2 app instances. That's 24 instances 
+total. At 100 connections each, that's 2,400 potential concurrent database connections. 
+Our PostgreSQL max_connections is 3,000, so we'd be at 80% capacity. Workable but 
+leaves limited headroom.
+
+Priya Patel [09:19 AM]: Good point. We could use PgBouncer as connection pooler. 
+That would let us set higher application-side limits while actual database 
+connections stay reasonable.
+
+Marcus Rodriguez [09:21 AM]: PgBouncer is cleaner. Let's schedule a deep dive session. 
+I'd rather spend extra day getting architecture right than rush into a fix that 
+creates new problems.
+
+Sarah Chen [09:23 AM]: Agreed. Add this to next week's architecture review. Priya, 
+can you prepare a brief RFC document?
+
+Priya Patel [09:24 AM]: Will do. I'll have something circulated by Thursday.
+
+---
+
+## 1.3 Frontend Updates - James Kim
+
+James Kim [09:26 AM]: Frontend updates. We've completed component library migration 
+to React 18. This unblocks several features:
+
+**Completed:**
+- All 47 core components now use React 18 concurrent rendering
+- Automated test suite updated and passing (1,234 tests)
+- Bundle size reduced by 12% thanks to tree-shaking improvements
+- First Contentful Paint improved from 2.1s to 1.7s on 3G networks
+
+**In Progress:**
+- Dashboard real-time updates using Server-Sent Events
+- Offline-first architecture for mobile users
+- Accessibility audit remediation (87% WCAG 2.1 AA compliance, targeting 95%)
+
+**Blockers:**
+- Waiting on backend API versioning for notification service
+- Design specs for new settings page still in review
+- Performance regression on data grid component with 10k+ rows
+
+David Park [09:30 AM]: On settings page - I have updated mocks ready. Main change is 
+reorganizing from 8 categories to 5, based on user research:
+1. Account & Security
+2. Notifications & Alerts  
+3. Privacy & Data
+4. Appearance & Accessibility
+5. Integrations & API
+
+I'll share Figma links in Slack after this meeting.
+
+James Kim [09:32 AM]: Perfect. On data grid issue - when we load more than 10,000 
+rows, virtual scrolling breaks down and frame rates drop to 15-20 FPS. Elena, seen 
+this in testing?
+
+Elena Vasquez [09:33 AM]: Yes, happens with datasets over 10k rows. Largest 
+production dataset is 15k rows for transaction history. Lag noticeable on 
+mid-range laptops.
+
+James Kim [09:35 AM]: Got it. I'll investigate virtualization logic.
+
+Sarah Chen [09:38 AM]: James, add this to your sprint tasks with 3-day timebox for 
+investigation and proposed solution. We can reassess if it needs more time.
+
+---
+
+## 1.4 DevOps Infrastructure - Alex Thompson
+
+Alex Thompson [09:41 AM]: Infrastructure updates. Three main topics:
+
+**Cost Optimization:**
+We've identified $12,000/month in potential savings:
+- Right-sizing underutilized EC2 instances: $4,500/month
+- Moving non-production to spot instances: $3,200/month  
+- Deleting orphaned EBS snapshots: $1,800/month
+- Reserved Instance purchases: $2,500/month
+
+I need approval for first three items. Reserved Instances requires finance review.
+
+Sarah Chen [09:44 AM]: First three items approved. For Reserved Instances, let's 
+schedule finance meeting next week.
+
+**CI/CD Pipeline Improvements:**
+Alex Thompson [09:47 AM]: Build times increased from 8 to 14 minutes. Bottlenecks:
+1. npm install: 4 min (can reduce to 30 sec with caching)
+2. Test suite: 7 min (parallelization to 3 min)
+3. Docker build: 3 min (multi-stage to 90 sec)
+
+Marcus Rodriguez [09:50 AM]: Slower builds affect developer velocity.
+
+Sarah Chen [09:51 AM]: Approved. What do you need from development team?
+
+Alex Thompson [09:52 AM]: Mainly cooperation on test parallelization. Some 
+integration tests have shared state needing refactoring.
+
+Elena Vasquez [09:53 AM]: Makes sense. We've been meaning to fix test isolation 
+issues anyway.
+
+---
+
+**Security Updates:**
+Alex Thompson [09:55 AM]: Quarterly security scan results:
+
+1. **Outdated TLS Configuration**: Supporting TLS 1.0 and 1.1. Recommendation: 
+   Require TLS 1.2 minimum. Impact: ~0.3% users on old browsers.
+
+2. **Dependency Vulnerabilities**: Three npm packages with vulnerabilities:
+   - lodash@4.17.20 (CVE-2021-23337)
+   - node-fetch@2.6.1 (CVE-2022-0155)
+   - minimist@1.2.5 (CVE-2021-44906)
+
+Marcus Rodriguez [10:03 AM]: Dependencies should be a day's work.
+
+---
+
+## 1.5 Action Items Summary
+
+| Item | Owner | Due Date | Priority |
+|------|-------|----------|----------|
+| Connection pooling RFC | Priya Patel | Oct 5 | High |
+| Settings page mockups | David Park | Oct 3 | Medium |
+| Data grid investigation | James Kim | Oct 9 | Medium |
+| CI/CD optimization | Alex Thompson | Oct 16 | High |
+| Dependency updates | Marcus Rodriguez | Oct 6 | High |
+| TLS impact analysis | Alex Thompson | Oct 9 | Medium |
+
+---
+
+# SECTION 2: Technical Interview - October 5, 2025
+
+**Position:** Senior Backend Engineer
+**Candidate:** Michael Torres
+**Interviewer:** Priya Patel
+
+---
+
+## 2.1 System Design Question
+
+Priya Patel [02:00 PM]: Build a real-time notification system. We have 2.5 million 
+active users, peak concurrency around 400,000. Walk me through your approach.
+
+Michael Torres [02:02 PM]: Let me clarify requirements:
+1. Expected notification volume?
+2. Strict ordering or eventual consistency?
+3. What channels - in-app, email, SMS, push?
+4. Latency requirements?
+
+Priya Patel [02:03 PM]: Average 20 notifications/user/day with spikes. Order matters 
+within session. All channels. In-app within 2 seconds, email/SMS within 5 minutes.
+
+Michael Torres [02:05 PM]: I'd propose event-driven architecture with pub-sub:
+
+**Core Architecture:**
+- Multiple event sources and consumers
+- Message broker: Kafka or AWS SNS/SQS
+
+**Storage:**
+- PostgreSQL for user preferences and metadata
+- Redis for caching
+- Possibly DynamoDB for history
+
+Priya Patel [02:11 PM]: How do you handle in-app real-time vs batched email/SMS?
+
+Michael Torres [02:12 PM]: Separate pipelines:
+
+**In-App (Real-time):**
+- WebSocket connections for active users
+- Notification fanout service
+- Server-Sent Events as fallback
+- Store notifications for offline users
+
+**Email/SMS (Batched):**
+- Accumulate in queue
+- Scheduled job every 5 minutes
+- Group into digest emails
+- Exponential backoff for failures
+
+Priya Patel [02:16 PM]: What if a post is deleted before notification is delivered?
+
+Michael Torres [02:17 PM]: Three safeguards:
+1. **Event Validation**: Check content exists before delivery
+2. **Event Sourcing**: Keep immutable log for audits
+3. **Cancellation Mechanism**: Remove pending notifications when content deleted
+
+---
+
+## 2.2 Coding Exercise
+
+Priya Patel [02:22 PM]: Implement rate limiter. User can trigger at most N 
+notifications per minute. Excess should be queued.
+
+Michael Torres [02:24 PM]: I'll use sliding window counter approach:
+
+```python
+import time
+from collections import defaultdict
+
+class RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: int):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests = defaultdict(list)
+    
+    def is_allowed(self, user_id: str):
+        now = time.time()
+        window_start = now - self.window_seconds
+        
+        self.requests[user_id] = [
+            t for t in self.requests[user_id] if t > window_start
+        ]
+        
+        if len(self.requests[user_id]) < self.max_requests:
+            self.requests[user_id].append(now)
+            return True
+        return False
+```
+
+Michael Torres [02:28 PM]: For production, I'd use Redis with Lua scripts for 
+atomicity across multiple servers. Trade-offs:
+- **Advantages**: Consistent, durable, atomic
+- **Disadvantages**: Added latency, single point of failure, cost
+
+---
+
+## 2.3 Candidate Questions
+
+Michael Torres [02:35 PM]: How is the backend team organized?
+
+Priya Patel [02:36 PM]: Product-aligned squads. Each has 2-4 backend engineers, 
+1-2 frontend, designer, and PM. Plus a platform team for infrastructure.
+
+Michael Torres [02:37 PM]: Most interesting technical challenge?
+
+Priya Patel [02:38 PM]: Rebuilding data pipeline for real-time analytics. 
+Currently batch nightly, evaluating Flink vs Kinesis.
+
+Michael Torres [02:39 PM]: How do you handle technical debt?
+
+Priya Patel [02:40 PM]: 20% of each sprint goes to tech debt. Also have RFC 
+process for larger refactoring projects. We track debt visibly in the backlog.
+
+---
+
+# SECTION 3: Customer Support Chat - October 8, 2025
+
+## 3.1 Chat #45892 - Billing Inquiry
+
+**Customer:** Jennifer Martinez, Enterprise Plan
+**Agent:** Tom Bradley
+
+[08:15] Jennifer M.: Hi, got our invoice with unexpected charge: "API Overage - 
+$247.50". We've been on Enterprise for 8 months, never had this before.
+
+[08:16] Tom B.: Hello Jennifer, let me look into this. Can you confirm the account?
+
+[08:17] Jennifer M.: jmartinez@techcorp.com
+
+[08:19] Tom B.: I see the charge. Your account averaged 45,000 API calls/day in Q3. 
+Enterprise includes 50,000/day. Past 7 days jumped to 78,000/day average, peak 
+112,000 on Oct 3rd.
+
+[08:21] Jennifer M.: We didn't launch anything new. Why the spike?
+
+[08:23] Tom B.: Spike coincides with your integration update on Oct 1st. I see 
+repeated requests for same resources - same user profile fetched 50-100 times/hour. 
+Looks like a caching issue.
+
+[08:25] Jennifer M.: We migrated to new server last week. Not sure if Redis cache 
+was configured correctly.
+
+[08:26] Tom B.: That explains it. Without caching, every page load hits API 
+directly. Could easily multiply calls 10x.
+
+[08:27] Jennifer M.: Can you do anything about the charge? We'll fix caching 
+immediately, but $247 is significant.
+
+[08:29] Tom B.: I'll escalate for one-time courtesy credit. Can't promise, but 
+given your history, I think we can work something out. Meanwhile:
+1. Verify Redis cache configuration
+2. Set up usage alerts at 80% threshold
+3. Review API caching best practices
+
+[08:32] Jennifer M.: How do I set up alerts?
+
+[08:33] Tom B.: I'll configure them now. 80% (40k/day) warning, 95% critical?
+
+[08:34] Jennifer M.: Yes, perfect.
+
+[08:35] Tom B.: Done. You'll hear about the credit within 24 hours.
+
+---
+
+## 3.2 Chat #45915 - Webhook Troubleshooting
+
+**Customer:** Raj Krishnamurthy, Pro Plan
+**Agent:** Mike Chen
+
+[10:45] Raj K.: Webhook endpoint stopped receiving events 3 hours ago. Was working 
+until 7:45 AM EST. Endpoint: https://api.myapp.com/webhooks/nexus-events
+
+[10:47] Mike C.: Let me check. I see successful deliveries until 7:43 AM, then 
+all failing with HTTP 503 "Service Temporarily Unavailable".
+
+[10:52] Raj K.: Our monitoring shows no downtime. We deployed at 7:40 AM - might 
+have been brief restart.
+
+[10:54] Mike C.: When webhooks fail, we retry with exponential backoff. After 10 
+failures, we pause 30 minutes. Your endpoint failed 7:45-8:30 AM, triggering pause.
+
+[10:55] Raj K.: Pause ended at 9:00 AM. Why still not working at 10:55?
+
+[10:57] Mike C.: After pause expired, we tried resuming but endpoint still failed. 
+After 10 more failures, system entered 4-hour cooldown until 1:10 PM.
+
+[10:59] Raj K.: That's problematic for time-sensitive events. Options?
+
+[11:00] Mike C.: 
+1. I can reset cooldown manually (if endpoint healthy)
+2. Temporarily change webhook URL to reset counter
+3. Use maintenance mode API before future deployments
+
+[11:02] Raj K.: Endpoint is healthy now. Please reset.
+
+[11:03] Mike C.: Done. Sending test event... Did you receive it?
+
+[11:10] Raj K.: Yes! Working now. Thanks.
+
+[11:11] Mike C.: Recommendations:
+1. Health monitoring endpoint returning 200 only when fully operational
+2. Use `POST /api/webhooks/{id}/pause` before maintenance
+3. Configure failure alerts at 3 consecutive failures
+
+---
+
+# SECTION 4: API Documentation Excerpt
+
+## Rate Limiting Guide
+
+### Rate Limit Tiers
+
+| Plan | Requests/Minute | Requests/Day |
+|------|----------------|--------------|
+| Free | 60 | 1,000 |
+| Pro | 1,000 | 100,000 |
+| Enterprise | 5,000 | Unlimited |
+
+### Response Headers
+
+---
+
+**Generated:** October 8, 2025

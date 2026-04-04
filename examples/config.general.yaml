@@ -1,0 +1,202 @@
+# Longtext Pipeline - General Analysis Configuration
+#
+# This configuration file is optimized for general-purpose text analysis,
+# summarization, and document processing.
+#
+# Usage:
+#   longtext run <input-file> --config examples/config.general.yaml
+#
+# Environment variable overrides available:
+#   OPENAI_API_KEY       - API key for OpenAI service (recommended: set via env)
+#   OPENAI_BASE_URL      - Base URL for custom OpenAI-compatible endpoints
+#   LONGTEXT_MODEL_PROVIDER - Override default model provider
+#   LONGTEXT_MODEL_NAME  - Override default model name
+#   LONGTEXT_OUTPUT_DIR  - Override default output directory
+#   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+# Settings for the LLM provider and model used throughout the pipeline.
+model:
+  # Model provider. Supported: "openai", "openrouter", "ollama", etc.
+  # Determines which API endpoint and authentication method to use.
+  provider: "openai"
+
+  # Model name/identifier. Common choices:
+  #   - gpt-4o-mini: Fast, cost-effective (recommended for most use cases)
+  #   - gpt-4o: Higher quality, slower, more expensive
+  #   - Custom model names for other providers
+  name: "gpt-4o-mini"
+
+  # API endpoint URL. Set to null to use provider default.
+  # Useful for:
+  #   - OpenAI proxy servers
+  #   - Self-hosted models (Ollama, vLLM, etc.)
+  #   - Alternative API providers
+  base_url: null
+
+  # API key for authentication. Best practice is to use environment variable.
+  # Syntax: ${ENV_VAR_NAME} or ${ENV_VAR_NAME:-default_value}
+  api_key: "${OPENAI_API_KEY}"
+
+  # Generation temperature (0.0 to 2.0).
+  #   - 0.0-0.3: More deterministic, focused output
+  #   - 0.5-0.8: Balanced creativity and coherence (recommended: 0.7)
+  #   - 1.0+: More random, creative, but potentially incoherent
+  temperature: 0.7
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+# Controls behavior of each processing stage in the pipeline.
+stages:
+  # -------------------------------------------------------------------------
+  # INGEST STAGE
+  # -------------------------------------------------------------------------
+  # Reads the input file and splits it into manageable chunks for processing.
+  ingest:
+    # Chunk size in characters.
+    # Recommended: 4000 chars (~1000-1500 tokens)
+    # Larger values = fewer API calls but risk context overflow
+    # Smaller values = more granular but more API calls
+    chunk_size: 4000
+
+    # Overlap ratio between consecutive chunks (0.0 to 1.0).
+    # Prevents important context from falling between chunk boundaries.
+    #   - 0.0: No overlap (risk of losing context at boundaries)
+    #   - 0.1: 10% overlap (recommended, balances coverage and efficiency)
+    #   - 0.2+: More overlap = better context but more redundant processing
+    overlap_rate: 0.1
+
+  # -------------------------------------------------------------------------
+  # SUMMARIZE STAGE
+  # -------------------------------------------------------------------------
+  # Generates summaries for each chunk produced by the ingest stage.
+  summarize:
+    # Path to the summary prompt template file.
+    # Path is relative to prompts.dir setting.
+    # This template receives TEXT_TO_SUMMARIZE variable.
+    prompt_template: "prompts/summary_general.txt"
+
+    # Number of parts to process in parallel.
+    # Higher values = faster processing but more API calls concurrently
+    # Lower values = slower but gentler on rate limits
+    batch_size: 4
+
+  # -------------------------------------------------------------------------
+  # STAGE (AGGREGATION)
+  # -------------------------------------------------------------------------
+  # Combines multiple summaries into higher-level stage summaries.
+  stage:
+    # Number of summaries to combine into a single stage file.
+    #   - 3-5: Conservative aggregation (more stage files)
+    #   - 5-7: Balanced (recommended: 5)
+    #   - 8+: Aggressive aggregation (fewer stage files, larger context)
+    group_size: 5
+
+    # Path to the stage aggregation prompt template.
+    # Receives SUMMARIES_TO_COMBINE variable containing the texts.
+    prompt_template: "prompts/stage_general.txt"
+
+  # -------------------------------------------------------------------------
+  # FINAL STAGE
+  # -------------------------------------------------------------------------
+  # Produces the final cross-stage analysis synthesizing all information.
+  final:
+    # Path to the final analysis prompt template.
+    # Receives all stage summaries as input for holistic analysis.
+    prompt_template: "prompts/final_general.txt"
+
+  # -------------------------------------------------------------------------
+  # AUDIT STAGE (OPTIONAL)
+  # -------------------------------------------------------------------------
+  # Post-processing quality check for hallucinations and errors.
+  audit:
+    # Enable or disable the audit stage.
+    # Disabled by default as this is experimental functionality.
+    enabled: false
+
+    # Path to the audit prompt template.
+    # Reviews output for factual consistency and logical coherence.
+    prompt_template: "prompts/audit_general.txt"
+
+# =============================================================================
+# PROMPTS CONFIGURATION
+# =============================================================================
+# Settings for prompt template loading and format selection.
+prompts:
+  # Root directory where prompt templates are located.
+  # All prompt_template paths in sections above are relative to this dir.
+  dir: "./src/longtext_pipeline/prompts"
+
+  # Prompt format style. Must match available template files:
+  #   - "general": Standard summarization and analysis (this config)
+  #   - "relationship": Entity and relationship-focused analysis
+  format: "general"
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+# Controls output file locations and naming conventions.
+output:
+  # Directory where all output files will be written.
+  # Will be created if it doesn't exist.
+  dir: "./output"
+
+  # File naming conventions for each stage's output.
+  naming:
+    # Prefix for summary files (created for each ingested chunk).
+    # Format: {summarize_prefix}{part_number}.md
+    summarize_prefix: "summary_"
+
+    # Prefix for stage files (created for each aggregation step).
+    # Format: {stage_prefix}{stage_number}.md
+    stage_prefix: "stage_"
+
+    # Filename for the final analysis output.
+    # This is the primary deliverable of the pipeline.
+    final_filename: "final_analysis.md"
+
+  # Whether to keep intermediate files (parts, summaries, stages).
+  #   - true: Keep all files for debugging and audit trail
+  #   - false: Clean up intermediates, keep only final output
+  save_intermediate: true
+
+# =============================================================================
+# INPUT CONFIGURATION
+# =============================================================================
+# Settings for input file handling.
+input:
+  # Path to the input file to process.
+  # Can also be provided via command line argument.
+  # Supported formats: .txt, .md (UTF-8 encoded)
+  file_path: null
+
+  # Character encoding for input file.
+  # Use utf-8 for most modern text files.
+  # Alternatives: utf-16, latin-1, cp1252, etc.
+  encoding: "utf-8"
+
+# =============================================================================
+# PIPELINE CONFIGURATION
+# =============================================================================
+# General pipeline behavior and performance settings.
+pipeline:
+  # Enable resumable processing via manifest.json checkpointing.
+  # When true:
+  #   - Progress saved after each stage
+  #   - Can resume from interruption point
+  #   - Hash validation prevents processing changed files
+  allow_resume: true
+
+  # Enable post-processing audit phase.
+  # Works in conjunction with stages.audit.enabled.
+  # Audits final output for consistency and potential hallucinations.
+  audit_enabled: false
+
+  # Maximum number of concurrent workers for parallel operations.
+  #   - 1-2: Conservative, minimal resource usage
+  #   - 4: Balanced (recommended for most systems)
+  #   - 8+: Aggressive, may hit API rate limits
+  max_workers: 4

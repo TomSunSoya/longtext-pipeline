@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "longtext-pipeline"
+version = "0.1.0"
+description = "A Python CLI tool for hierarchical analysis of super-long texts"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "longtext-pipeline Team", email = "team@longtext.example.com"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.24.0",
+    "pyyaml>=6.0.1",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[project.scripts]
+longtext = "longtext_pipeline.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["src/longtext_pipeline"]

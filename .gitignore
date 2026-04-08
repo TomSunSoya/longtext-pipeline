@@ -43,3 +43,35 @@ htmlcov/
 
 # Local data
 .longtext/
+
+# OpenCode working directory
+.sisyphus/
+
+# Project output directory
+output/
+
+# Environment variables (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Temporary test directories
+test_init_dir/
+another_test_dir/
+temp_combined.txt
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# MyPy/Pylint
+.mypy_cache/
+.pylint_cache/
+
+# Pyright
+.pyright/

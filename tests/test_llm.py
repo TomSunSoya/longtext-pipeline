@@ -17,16 +17,32 @@ from src.longtext_pipeline.errors import (
 )
 
 
+def make_llm_config(
+    provider: str = "openai",
+    name: str | None = "gpt-4o-mini",
+    api_key: str | None = None,
+    base_url: str | None = None,
+    timeout: float | None = None,
+) -> dict:
+    """Build config objects using the current nested model schema."""
+    model = {"provider": provider}
+    if name is not None:
+        model["name"] = name
+    if api_key is not None:
+        model["api_key"] = api_key
+    if base_url is not None:
+        model["base_url"] = base_url
+    if timeout is not None:
+        model["timeout"] = timeout
+    return {"model": model}
+
+
 class TestGetLLMClient:
     """Test cases for get_llm_client factory function."""
     
     def test_factory_returns_openai_compatible_client(self):
         """Test that factory returns OpenAICompatibleClient instance."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(api_key="test-key")
         
         client = get_llm_client(config)
         
@@ -35,13 +51,11 @@ class TestGetLLMClient:
     
     def test_factory_passes_config_values_correctly(self):
         """Test that config values are passed to client correctly."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": "test-api-key",
-            "base_url": "https://custom.api.com",
-            "timeout": 60.0,
-        }
+        config = make_llm_config(
+            api_key="test-api-key",
+            base_url="https://custom.api.com",
+            timeout=60.0,
+        )
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
             try:
@@ -59,11 +73,7 @@ class TestGetLLMClient:
 
     def test_factory_accepts_name_key_for_model(self):
         """Test that model configs using `name` are supported."""
-        config = {
-            "provider": "openai",
-            "name": "deepseek-chat",
-            "api_key": "test-api-key",
-        }
+        config = make_llm_config(name="deepseek-chat", api_key="test-api-key")
 
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
             try:
@@ -76,11 +86,7 @@ class TestGetLLMClient:
     
     def test_factory_uses_default_timeout_when_not_specified(self):
         """Test that default timeout is used when not specified."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(api_key="test-key")
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
             try:
@@ -94,10 +100,7 @@ class TestGetLLMClient:
     
     def test_env_var_fallback_for_api_key(self):
         """Test that environment variable is used when api_key not in config."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-        }
+        config = make_llm_config(api_key=None)
         
         with patch.dict(os.environ, {"OPENAI_API_KEY": "env-api-key"}):
             with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
@@ -111,11 +114,7 @@ class TestGetLLMClient:
     
     def test_env_var_fallback_for_base_url(self):
         """Test that environment variable is used when base_url not in config."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(api_key="test-key")
         
         with patch.dict(os.environ, {"OPENAI_BASE_URL": "https://env.api.com"}):
             with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
@@ -129,10 +128,7 @@ class TestGetLLMClient:
     
     def test_env_var_fallback_for_model_name(self):
         """Test that LONGTEXT_MODEL_NAME env var is used when model not in config."""
-        config = {
-            "provider": "openai",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(name=None, api_key="test-key")
         
         with patch.dict(os.environ, {"LONGTEXT_MODEL_NAME": "env-model"}):
             with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
@@ -146,13 +142,12 @@ class TestGetLLMClient:
     
     def test_explicit_args_override_config(self):
         """Test that explicit function arguments override config values."""
-        config = {
-            "provider": "openai",
-            "model": "config-model",
-            "api_key": "config-key",
-            "base_url": "https://config.api.com",
-            "timeout": 30.0,
-        }
+        config = make_llm_config(
+            name="config-model",
+            api_key="config-key",
+            base_url="https://config.api.com",
+            timeout=30.0,
+        )
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
             try:
@@ -175,10 +170,7 @@ class TestGetLLMClient:
     
     def test_explicit_args_override_env_vars(self):
         """Test that explicit arguments override environment variables."""
-        config = {
-            "provider": "openai",
-            "api_key": "config-key",
-        }
+        config = make_llm_config(name=None, api_key="config-key")
         
         with patch.dict(os.environ, {
             "OPENAI_API_KEY": "env-key",
@@ -201,11 +193,7 @@ class TestGetLLMClient:
     
     def test_config_values_override_env_vars(self):
         """Test that config values override environment variables."""
-        config = {
-            "provider": "openai",
-            "model": "config-model",
-            "api_key": "config-key",
-        }
+        config = make_llm_config(name="config-model", api_key="config-key")
         
         with patch.dict(os.environ, {
             "OPENAI_API_KEY": "env-key",
@@ -237,10 +225,7 @@ class TestGetLLMClient:
     
     def test_unsupported_provider_raises_value_error(self):
         """Test that unsupported provider raises ValueError."""
-        config = {
-            "provider": "anthropic",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(provider="anthropic", name=None, api_key="test-key")
         
         with pytest.raises(ValueError) as exc_info:
             get_llm_client(config)
@@ -249,10 +234,7 @@ class TestGetLLMClient:
     
     def test_openai_provider_creates_client(self):
         """Test that 'openai' provider creates OpenAICompatibleClient."""
-        config = {
-            "provider": "openai",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(name=None, api_key="test-key")
         
         client = get_llm_client(config)
         
@@ -260,10 +242,7 @@ class TestGetLLMClient:
     
     def test_openrouter_provider_creates_client(self):
         """Test that 'openrouter' provider creates OpenAICompatibleClient."""
-        config = {
-            "provider": "openrouter",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(provider="openrouter", name=None, api_key="test-key")
         
         client = get_llm_client(config)
         
@@ -271,10 +250,7 @@ class TestGetLLMClient:
     
     def test_ollama_provider_creates_client(self):
         """Test that 'ollama' provider creates OpenAICompatibleClient."""
-        config = {
-            "provider": "ollama",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(provider="ollama", name=None, api_key="test-key")
 
         client = get_llm_client(config)
 
@@ -309,10 +285,7 @@ class TestOpenAICompatibleClient:
     
     def test_vllm_provider_creates_client(self):
         """Test that 'vllm' provider creates OpenAICompatibleClient."""
-        config = {
-            "provider": "vllm",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(provider="vllm", name=None, api_key="test-key")
         
         client = get_llm_client(config)
         
@@ -320,10 +293,7 @@ class TestOpenAICompatibleClient:
     
     def test_provider_case_insensitive(self):
         """Test that provider name is case-insensitive."""
-        config = {
-            "provider": "OPENAI",
-            "api_key": "test-key",
-        }
+        config = make_llm_config(provider="OPENAI", name=None, api_key="test-key")
         
         client = get_llm_client(config)
         
@@ -331,9 +301,7 @@ class TestOpenAICompatibleClient:
     
     def test_default_provider_is_openai(self):
         """Test that missing provider defaults to 'openai'."""
-        config = {
-            "api_key": "test-key",
-        }
+        config = {"model": {"api_key": "test-key"}}
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
             try:
@@ -363,11 +331,7 @@ class TestOpenAICompatibleClient:
     
     def test_client_can_be_used_for_completion(self):
         """Test that created client has required methods (integration test)."""
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": "test-key-for-validation",
-        }
+        config = make_llm_config(api_key="test-key-for-validation")
         
         client = get_llm_client(config)
         

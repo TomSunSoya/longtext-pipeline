@@ -1,0 +1,99 @@
+# Longtext Pipeline - Performance Test Configuration
+#
+# This configuration is optimized for testing async/parallel performance
+# without requiring real API calls.
+
+# =============================================================================
+# MODEL CONFIGURATION - Using local mock for testing
+# =============================================================================
+model:
+  # Use ollama for local testing or modify for your test setup
+  provider: "openai"
+  name: "gpt-4o-mini"
+  base_url: null  # Set to your test endpoint if needed
+  api_key: "${OPENAI_API_KEY:-test-key}"  # Use env var or test key
+  temperature: 0.7
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+stages:
+  ingest:
+    chunk_size: 4000
+    overlap_rate: 0.1
+
+  summarize:
+    prompt_template: "prompts/summary_general.txt"
+    batch_size: 4  # max_workers for parallel processing
+
+  stage:
+    group_size: 5
+    prompt_template: "prompts/stage_general.txt"
+
+  final:
+    prompt_template: "prompts/final_general.txt"
+
+  audit:
+    enabled: false
+    prompt_template: "prompts/audit_general.txt"
+
+# =============================================================================
+# PROMPTS CONFIGURATION
+# =============================================================================
+prompts:
+  dir: "./src/longtext_pipeline/prompts"
+  format: "general"
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+output:
+  dir: "./output_performance_test"
+  naming:
+    summarize_prefix: "summary_"
+    stage_prefix: "stage_"
+    final_filename: "final_analysis.md"
+  save_intermediate: true
+
+# =============================================================================
+# INPUT CONFIGURATION
+# =============================================================================
+input:
+  file_path: null  # Provided via CLI
+  encoding: "utf-8"
+
+# =============================================================================
+# PIPELINE CONFIGURATION
+# =============================================================================
+pipeline:
+  allow_resume: false  # Disable for clean performance tests
+  audit_enabled: false
+  max_workers: 4  # Critical: controls parallelism level
+
+# =============================================================================
+# AGENTS CONFIGURATION
+# =============================================================================
+agents:
+  summarizer:
+    model:
+      provider: "openai"
+      name: "gpt-4o-mini"
+      temperature: 0.7
+
+  stage_synthesizer:
+    model:
+      provider: "openai"
+      name: "gpt-4o-mini"
+      temperature: 0.7
+
+  analyst:
+    model:
+      provider: "openai"
+      name: "gpt-4o-mini"
+      temperature: 0.7
+
+  auditor:
+    model:
+      provider: "openai"
+      name: "gpt-4o-mini"
+      temperature: 0.0

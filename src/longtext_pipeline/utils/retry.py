@@ -3,6 +3,7 @@ Retry utilities for handling transient failures.
 Provides generic retry wrapper with exponential backoff.
 """
 
+import asyncio
 import random
 import time
 from functools import wraps
@@ -202,3 +203,123 @@ def retry_llm_call(
     if func is not None:
         return decorator(func)
     return decorator
+
+
+def _make_async_retry_decorator():
+    """Factory to create async retry decorator (to avoid async def calling issue)."""
+    def retry_llm_call_async(
+        func: Optional[Callable[..., T]] = None,
+        max_retries: int = 3,
+        backoff_factor: float = 2.0,
+        initial_delay: float = 1.0,
+        max_delay: float = 60.0,
+        add_jitter: bool = True,
+    ) -> Callable[[Callable[..., T]], Callable[..., T]]:
+        """
+        LLM-specific async retry wrapper with exponential backoff and jitter.
+        
+        Handles different error types appropriately:
+        - Rate limit (429): Exponential backoff with jitter
+        - Transient errors (500): Linear retry with short delay
+        - Auth errors (401): Fail fast, NO retry
+        
+        Usage:
+            @retry_llm_call_async(max_retries=3, backoff_factor=2)
+            async def call_llm(prompt: str) -> str:
+                return await client.complete_async(prompt)
+        
+        Args:
+            func: Function to wrap (typically LLM complete/complete_json methods)
+            max_retries: Maximum number of retry attempts (default: 3)
+            backoff_factor: Multiplier for delay between retries (default: 2.0)
+            initial_delay: Initial delay in seconds (default: 1.0)
+            max_delay: Maximum delay between retries in seconds (default: 60.0)
+            add_jitter: Whether to add random jitter to prevent thundering herd (default: True)
+            
+        Returns:
+            Wrapped function with retry logic
+            
+        Raises:
+            LLMAuthenticationError: Raised immediately without retry on 401
+            RetryError: If all retry attempts fail for retryable errors
+        """
+        def decorator(f: Callable[..., T]) -> Callable[..., T]:
+            @wraps(f)
+            async def wrapper(*args, **kwargs) -> T:
+                last_exception: Optional[Exception] = None
+                delay = initial_delay
+                
+                for attempt in range(max_retries + 1):  # +1 for initial attempt
+                    try:
+                        return await f(*args, **kwargs)
+                        
+                    except LLMAuthenticationError:
+                        # Auth errors (401) - fail fast, no retry
+                        raise
+                        
+                    except (LLMRateLimitError, LLMCommunicationError) as e:
+                        last_exception = e
+                        
+                        # If we've exhausted retries, raise
+                        if attempt >= max_retries:
+                            raise RetryError(
+                                f"LLM call failed after {max_retries + 1} attempts",
+                                last_exception=last_exception
+                            )
+                        
+                        # Calculate delay based on error type
+                        if isinstance(e, LLMRateLimitError):
+                            # Rate limit (429): exponential backoff
+                            calculated_delay = delay * (backoff_factor ** attempt)
+                        else:
+                            # Transient server errors (500): shorter linear retry
+                            calculated_delay = delay * (attempt + 1)
+                        
+                        # Apply jitter to prevent thundering herd
+                        if add_jitter:
+                            jitter = random.uniform(0, calculated_delay * 0.5)
+                            calculated_delay += jitter
+                        
+                        # Cap delay at max_delay
+                        sleep_time = min(calculated_delay, max_delay)
+                        
+                        await asyncio.sleep(sleep_time)
+                        
+                    except Exception as e:
+                        # Unknown errors - retry with exponential backoff
+                        last_exception = e
+                        
+                        if attempt >= max_retries:
+                            raise RetryError(
+                                f"LLM call failed after {max_retries + 1} attempts",
+                                last_exception=last_exception
+                            )
+                        
+                        calculated_delay = delay * (backoff_factor ** attempt)
+                        
+                        if add_jitter:
+                            jitter = random.uniform(0, calculated_delay * 0.5)
+                            calculated_delay += jitter
+                        
+                        sleep_time = min(calculated_delay, max_delay)
+                        await asyncio.sleep(sleep_time)
+                
+                # Should never reach here
+                if last_exception:
+                    raise RetryError(
+                        f"LLM call failed after {max_retries + 1} attempts",
+                        last_exception=last_exception
+                    )
+                raise RetryError(f"LLM call failed after {max_retries + 1} attempts")
+            
+            return wrapper
+        
+        # Support both @retry_llm_call_async and @retry_llm_call_async(...) usage
+        if func is not None:
+            return decorator(func)
+        return decorator
+    
+    return retry_llm_call_async
+
+
+retry_llm_call_async = _make_async_retry_decorator()

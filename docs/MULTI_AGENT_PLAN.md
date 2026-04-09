@@ -1,182 +1,202 @@
-# 多 Agent 并行改造方案
+# 多 Agent 并行架构说明
 
-## 一、当前瓶颈分析
+本文档描述当前代码库中已经落地的多 Agent / 并行分析架构，以及已经明确放弃的旧方案。
 
-| 阶段 | 当前行为 | LLM 调用次数 | 可并行度 |
-|------|---------|-------------|---------|
-| Ingest | 纯本地 I/O，无 LLM | 0 | 不需要 |
-| Summarize | `for part in parts` 串行循环 | N（= part 数量） | **完全独立，可全并行** |
-| Stage Synthesis | `for group in groups` 串行循环 | M（= group 数量） | **完全独立，可全并行** |
-| Final | 单次调用 | 1 | 不可并行 |
+## 1. 当前真实架构
 
-config 里已经定义了 `batch_size: 4` 和 `max_workers: 4`，但代码中**完全未使用**。
+当前实现不是“全链路 queue 流水线”，而是：
 
----
+1. `LongtextPipeline.run()` 保持同步入口。
+2. `SummarizeStage.run()` 和 `StageSynthesisStage.run()` 是异步 stage，但只做 stage 内并发。
+3. Orchestrator 在同步边界用 `asyncio.run()` 调用异步 stage。
+4. `FinalAnalysisStage.run(..., multi_perspective=True)` 才会进入多 Agent 并行分析。
 
-## 二、分层改造（由浅到深 3 层）
+也就是说，当前系统是：
 
-### Layer 1：异步 LLM 层（基础设施）
+`sync orchestrator -> async summarize fan-out -> async stage fan-out -> optional multi-agent final analysis`
 
-当前 `OpenAICompatibleClient` 用 `httpx.Client`（同步），每次调用都阻塞等待。
+## 2. 已落地能力
 
-**改动点：**
+### 2.1 异步 LLM 调用
 
-- `LLMClient` 基类新增 `acomplete()` 和 `acomplete_json()` 异步抽象方法
-- `OpenAICompatibleClient` 内部用 `httpx.AsyncClient` 实现异步版本，保留同步方法做向后兼容
-- `retry_llm_call` 装饰器新增异步版本 `retry_llm_call_async`，用 `asyncio.sleep` 替代 `time.sleep`
+- `LLMClient` 提供同步与异步两套接口：
+  - `complete()`
+  - `complete_json()`
+  - `acomplete()`
+  - `acomplete_json()`
+- `OpenAICompatibleClient` 同时支持 `httpx.Client` 和 `httpx.AsyncClient`
+- 异步重试通过 `retry_llm_call_async` 实现
 
-```
-LLMClient (base.py)
-├── complete()           # 保留，同步
-├── complete_json()      # 保留，同步
-├── async acomplete()        # 新增
-└── async acomplete_json()   # 新增
-```
+### 2.2 Stage 内并发
 
-### Layer 2：Stage 内并行（Fan-out）
+`SummarizeStage` 和 `StageSynthesisStage` 均使用：
 
-这是**收益最大**的一层。Summarize 和 Stage Synthesis 的工作项完全独立。
+- `asyncio.Semaphore(max_workers)` 控制并发上限
+- `asyncio.gather()` 扇出执行
+- Continue-with-Partial 策略处理局部失败
 
-**Summarize 阶段改造：**
+这两层都保留了输入顺序：
 
-```
-当前：  part_0 -> part_1 -> part_2 -> ... -> part_N  (串行)
+- `SummarizeStage.run()` 返回的 `Summary` 顺序与 `parts` 顺序一致
+- `StageSynthesisStage.run()` 返回的 `StageSummary` 顺序与分组顺序一致
 
-改为：  +-- part_0 --+
-        +-- part_1 --+
-        +-- part_2 --+  <- asyncio.Semaphore(max_workers) 控制并发
-        +-- ...     --+
-        +-- part_N --+
-        asyncio.gather() 收集结果
-```
+### 2.3 Final 阶段多 Agent 并行
 
-- 用 `asyncio.Semaphore(max_workers)` 做并发控制（读现有的 `pipeline.max_workers` 配置）
-- 每个 task 独立调用 `acomplete()`，独立 retry
-- 结果收集后按 `part_index` 排序，保证顺序一致
-- 失败的 task 记入 `ErrorAggregator`，其余继续（现有 Continue-with-Partial 策略不变）
+`FinalAnalysisStage` 内部支持四个 specialist agent 并行执行：
 
-**Stage Synthesis 同理**，fan-out 所有 group。
+- `topic_analyst`
+- `entity_analyst`
+- `sentiment_analyst`
+- `timeline_analyst`
 
-### Layer 3：Stage 间流水线化（Streaming Pipeline）
+然后由 `analyst` 作为 meta-agent 做整合。
 
-当前：必须等所有 summary 完成才开始 stage synthesis。
+内部调用链如下：
 
-**改为 Producer-Consumer 流式：**
+1. `_run_multi_perspective()`
+2. `_generate_specialist_analysis(...)` 并发执行四次
+3. `_aggregate_with_meta_agent(...)` 聚合成功结果
+4. 若成功 specialist 少于 3 个，则回退到 `_run_single_pass()`
 
-```
-Summarize (producer)          Stage Synthesis (consumer)
-    |                              |
-    +-- summary_0 done --+         |
-    +-- summary_1 done --+         |
-    +-- summary_2 done --+         |
-    +-- summary_3 done --+         |
-    +-- summary_4 done --+--> 凑够 group_size=5 --> 立即启动 group_0 合成
-    +-- summary_5 done --+         |
-    +-- ...              --+       |
-    +-- summary_9 done --+--> 凑够 group_size=5 --> 立即启动 group_1 合成
-    ...
-```
+阈值规则：
 
-- 用 `asyncio.Queue` 连接两个阶段
-- Summarize 完成一个就往 queue 里推
-- Stage Synthesis 的 collector 从 queue 取，攒够 `group_size` 个就启动一个合成 task
-- Final 阶段仍需等所有 stage synthesis 完成（这是数据依赖，无法绕过）
+- `>= 3/4` specialist 成功：继续多视角结果整合
+- `< 3/4` specialist 成功：回退到单次分析
 
-**效果**：假如有 20 个 part，`group_size=5`，现在不需要等 20 个 summary 全完成；前 5 个 summary 一完成，stage_0 就可以开始了。总延迟显著缩短。
+## 3. 配置契约
 
----
+当前统一使用嵌套 `model` 结构，不再使用扁平旧格式。
 
-## 三、真正的多 Agent（异构 Agent 角色）
+多视角 specialist 数量现在可以显式指定：
 
-以上是"并行化"，如果要做真正的**多 Agent 协作**，核心思路是：不同阶段用不同模型/角色。
+- CLI: `longtext run input.txt -mp --agent-count 2`
+- 配置: `pipeline.specialist_count: 2`
 
-### 3.1 异构模型配置
+规则：
+
+- 取值范围为 `1..4`
+- 未指定时默认使用全部 4 个 specialist
+- `--agent-count` 会自动开启多视角模式，即使没有显式传 `-mp`
+- specialist 选择顺序固定为：
+  1. `topic_analyst`
+  2. `entity_analyst`
+  3. `sentiment_analyst`
+  4. `timeline_analyst`
+- 成功阈值为 `min(3, specialist_count)`
+
+示例：
 
 ```yaml
+model:
+  provider: openai
+  name: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  timeout: 120.0
+
+pipeline:
+  max_workers: 4
+
+stages:
+  stage:
+    group_size: 5
+
 agents:
   summarizer:
-    model: "deepseek-chat"        # 便宜快速模型
-    temperature: 0.3
-    system_prompt: "你是一个精确的文本摘要专家..."
-
-  synthesizer:
-    model: "deepseek-chat"
-    temperature: 0.5
-    system_prompt: "你是一个擅长归纳整合的分析师..."
-
+    model: null
+  stage_synthesizer:
+    model: null
   analyst:
-    model: "claude-sonnet-4-6"   # 贵但强的模型，只在 final 用
-    temperature: 0.7
-    system_prompt: "你是一个资深分析师..."
-
-  auditor:
-    model: "deepseek-chat"
-    temperature: 0.1              # 低温度，审核更严谨
-    system_prompt: "你是一个事实核查专家..."
+    model:
+      provider: openai
+      name: gpt-4o
+  topic_analyst:
+    model:
+      provider: openai
+      name: gpt-4o
+  entity_analyst:
+    model:
+      provider: openai
+      name: gpt-4o
+  sentiment_analyst:
+    model:
+      provider: openai
+      name: gpt-4o
+  timeline_analyst:
+    model:
+      provider: openai
+      name: gpt-4o
 ```
 
-每个 Agent 独立实例化 LLM client，可以指向不同 provider / model / temperature。当前的 `get_llm_client(model_config)` 已经支持这个能力，只需要让每个 stage 从 `agents.{role}` 取自己的配置而不是共用顶层 `model`。
+说明：
 
-### 3.2 多视角并行 Agent
+- `summarizer` / `stage_synthesizer` / `analyst` / `auditor` 是通用 agent
+- `topic_analyst` / `entity_analyst` / `sentiment_analyst` / `timeline_analyst` 是 Final 阶段 specialist
+- 某个 agent 的 `model: null` 表示回退到顶层 `model`
 
-```
-同一份 stage summaries
-        |
-        +--> Agent A: 主题/趋势分析
-        +--> Agent B: 实体/关系提取
-        +--> Agent C: 情感/态度分析
-        +--> Agent D: 时间线梳理
-        |
-        +--> Meta Agent: 整合四个视角 -> final_analysis
-```
+## 4. 明确废弃的旧方案
 
-在 Final 阶段前插入一个 **parallel specialist** 层，多个 agent 并行处理同一份输入，各自输出专项分析，最后由一个 meta agent 做整合。
+以下方案已不属于当前实现：
 
----
+### 4.1 Stage 间 queue 流水线
 
-## 四、需要配套改动的模块
+当前没有：
 
-| 模块 | 改动 |
-|------|------|
-| `llm/base.py` | 新增 `acomplete` / `acomplete_json` 抽象方法 |
-| `llm/openai_compatible.py` | 新增 `httpx.AsyncClient` 实现 + 共享连接池 |
-| `utils/retry.py` | 新增 `retry_llm_call_async`，用 `asyncio.sleep` |
-| `pipeline/summarize.py` | for 循环 -> `asyncio.gather` + `Semaphore` |
-| `pipeline/stage_synthesis.py` | 同上 |
-| `pipeline/orchestrator.py` | 顶层改为 `async def run()`，编排 stage 间的 queue 流水线 |
-| `cli.py` | 入口加 `asyncio.run()` |
-| `manifest.py` | 写入操作加锁（`asyncio.Lock`），多 task 并发写 manifest 时防竞争 |
-| `config.yaml` | 新增 `agents` 配置段；`max_workers` / `batch_size` 生效 |
-| `errors/continuation.py` | `ErrorAggregator` 加线程安全（或用 async-safe 收集） |
+- `asyncio.Queue` 串联 summarize 和 stage synthesis
+- producer / consumer 模式
+- `queue` 参数传入 `SummarizeStage.run()` 或 `StageSynthesisStage.run()`
 
----
+这条路线已经从实现和测试中移除。
 
-## 五、推荐实施顺序
+### 4.2 异步 orchestrator 公共接口
 
-```
-Phase 1  --  异步 LLM 层 + Summarize 并行
-             （改动最小，收益最大，20 个 part 从串行 20 次变为并发 4-8 次）
+当前没有把 orchestrator 的公共 `run()` 改成异步。
 
-Phase 2  --  Stage Synthesis 并行 + Stage 间流水线
-             （进一步压缩总延迟）
+保留同步 orchestrator 的原因：
 
-Phase 3  --  多 Agent 角色配置
-             （不同阶段用不同模型/参数，性价比优化）
+- CLI 和现有调用路径更稳定
+- sync / async 边界清晰
+- 避免在未知调用环境中嵌套 event loop
 
-Phase 4  --  多视角并行 Agent
-             （Final 前的 specialist 并行层，提升分析深度）
-```
+### 4.3 旧的 FinalAnalysis 私有接口
 
-### 预期收益
+以下旧接口已删除，不应再被测试或调用：
 
-**Phase 1 单独就能把 Summarize 阶段的耗时从 `N * avg_latency` 降到 `ceil(N/max_workers) * avg_latency`**。
+- `run_multi_perspective_analysis`
+- `_generate_topic_analysis`
+- `_generate_entity_analysis`
+- `_generate_sentiment_analysis`
+- `_generate_timeline_analysis`
+- `_run_single_pass_analysis`
 
-对于 20 个 part、`max_workers=4` 的场景，约 **5x 加速**。
+当前对应接口为：
 
-### 风险与注意事项
+- `_generate_specialist_analysis`
+- `_run_multi_perspective`
+- `_run_single_pass`
+- `run(..., multi_perspective=True)`
 
-1. **Rate Limit**：并发过高会触发 API 429，需要 Semaphore 限流 + 现有的 retry_llm_call 指数退避配合
-2. **Manifest 竞争写入**：多个并发 task 同时完成时会并发写 manifest，需要 `asyncio.Lock` 保护
-3. **内存压力**：大量 part 同时在内存中持有 prompt + response，需要关注峰值内存
-4. **向后兼容**：保留同步 `complete()` 方法，CLI 入口用 `asyncio.run()` 包装，不影响现有测试
-5. **错误可观测性**：并发场景下错误日志会交错，建议给每条日志加 `[part_XX]` / `[group_XX]` 前缀
+## 5. Manifest 并发策略
+
+`ManifestManager.save_manifest()` 当前保持同步方法。
+
+并发保护使用：
+
+- `threading.Lock`
+
+没有使用 `asyncio.Lock`，原因是 manifest 写入点跨同步/异步边界存在共享，使用线程锁更直接，也避免把同步调用链错误改成 coroutine。
+
+## 6. 设计结论
+
+当前代码库的选择是：
+
+- 保留同步 orchestrator
+- 在 stage 内做真正有收益的并发
+- 在 Final 阶段做真正有意义的多 Agent 专家分析
+- 不引入 queue streaming 这类额外复杂度
+- 不保留已经删除的旧接口
+
+如果后续继续扩展，推荐优先级如下：
+
+1. 继续优化 specialist prompt 与 meta-agent 聚合质量
+2. 为不同 specialist 引入更精细的模型路由策略
+3. 补充性能基准而不是恢复 queue 流水线

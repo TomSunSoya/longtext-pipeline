@@ -73,6 +73,32 @@ def run(
             help="Resume from existing manifest checkpoint if processing was interrupted.",
         ),
     ] = False,
+    multi_perspective: Annotated[
+        bool,
+        typer.Option(
+            "--multi-perspective", 
+            "-mp",
+            help="Enable multi-perspective analysis with parallel specialist agents.",
+        ),
+    ] = False,
+    agent_count: Annotated[
+        int | None,
+        typer.Option(
+            "--agent-count",
+            min=1,
+            max=4,
+            help="Number of final-analysis specialist agents to run (1-4). Implies --multi-perspective.",
+        ),
+    ] = None,
+    max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--max-workers",
+            min=1,
+            max=256,
+            help="Maximum concurrent workers for summarize and stage-synthesis execution (1-256).",
+        ),
+    ] = None,
 ) -> int:
     """Run the hierarchical analysis pipeline on a text file.
 
@@ -119,13 +145,27 @@ def run(
         if "prompts" in final_config and mode == "relationship":
             final_config["prompts"]["format"] = "relationship"
         
+        effective_multi_perspective = multi_perspective or agent_count is not None
+        final_config["multi_perspective"] = effective_multi_perspective
+        if max_workers is not None:
+            final_config.setdefault("pipeline", {})
+            final_config["pipeline"]["max_workers"] = max_workers
+        if agent_count is not None:
+            final_config.setdefault("pipeline", {})
+            final_config["pipeline"]["specialist_count"] = agent_count
+        
         # Step 3: Initialize LongtextPipeline from orchestrator
         pipeline = LongtextPipeline()
         
-        # Step 4: Execute pipeline with appropriate parameters
+            # Step 4: Execute pipeline with appropriate parameters
         print(f"Starting pipeline for: {input_path}")
         print(f"Mode: {mode}")
         print(f"Resume: {resume}")
+        print(f"Multi-perspective: {effective_multi_perspective}")
+        if max_workers is not None:
+            print(f"Max workers: {max_workers}")
+        if agent_count is not None:
+            print(f"Specialist agent count: {agent_count}")
         if loaded_sources:
             print(f"Config sources: {', '.join(loaded_sources)}")
         else:
@@ -138,7 +178,10 @@ def run(
                 input_path=input_path,
                 config_path=config,
                 mode=mode,
-                resume=resume
+                resume=resume,
+                multi_perspective=effective_multi_perspective,
+                specialist_count=agent_count,
+                max_workers=max_workers,
             )
             
             # Step 6: Determine exit code based on result

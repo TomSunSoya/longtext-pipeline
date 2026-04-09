@@ -75,6 +75,33 @@ DEFAULT_CONFIG = {
         "allow_resume": True,
         "audit_enabled": False,
         "max_workers": 4,
+        "specialist_count": 4,
+    },
+    "agents": {
+        "summarizer": {
+            "model": None,  # None means use top-level model config
+        },
+        "stage_synthesizer": {
+            "model": None,
+        },
+        "analyst": {
+            "model": None,
+        },
+        "auditor": {
+            "model": None,
+        },
+        "topic_analyst": {
+            "model": None,
+        },
+        "entity_analyst": {
+            "model": None,
+        },
+        "sentiment_analyst": {
+            "model": None,
+        },
+        "timeline_analyst": {
+            "model": None,
+        },
     },
 }
 
@@ -208,6 +235,7 @@ def validate_config(config: dict) -> bool:
         "output",
         "input",
         "pipeline",
+        "agents",
     }
 
     # Known nested keys per section
@@ -221,7 +249,7 @@ def validate_config(config: dict) -> bool:
     known_output_keys = {"dir", "naming", "save_intermediate"}
     known_naming_keys = {"summarize_prefix", "stage_prefix", "final_filename"}
     known_input_keys = {"file_path", "encoding"}
-    known_pipeline_keys = {"allow_resume", "audit_enabled", "max_workers"}
+    known_pipeline_keys = {"allow_resume", "audit_enabled", "max_workers", "specialist_count"}
 
     # Check top-level keys
     for key in config:
@@ -304,6 +332,41 @@ def validate_config(config: dict) -> bool:
             if key not in known_pipeline_keys:
                 warnings.warn(f"Unknown configuration key in pipeline: '{key}'")
 
+    # Validate agents section
+    if "agents" in config:
+        agents = config["agents"]
+        known_agent_keys = {
+            "summarizer",
+            "stage_synthesizer",
+            "analyst",
+            "auditor",
+            "topic_analyst",
+            "entity_analyst",
+            "sentiment_analyst",
+            "timeline_analyst",
+        }
+        known_agent_model_keys = {"model"}
+
+        for agent_name, agent_config in agents.items():
+            if agent_name not in known_agent_keys:
+                warnings.warn(
+                    f"Unknown agent type in agents: '{agent_name}'. "
+                    f"Supported: {', '.join(known_agent_keys)}"
+                )
+                continue
+
+            if not isinstance(agent_config, dict):
+                warnings.warn(
+                    f"Agent '{agent_name}' config must be a dictionary, got {type(agent_config)}"
+                )
+                continue
+
+            for key in agent_config:
+                if key not in known_agent_model_keys:
+                    warnings.warn(
+                        f"Unknown configuration key in agents.{agent_name}: '{key}'"
+                    )
+
     return True
 
 
@@ -337,6 +400,52 @@ def _substitute_env_vars(value: Any) -> Any:
             return ""
 
     return re.sub(pattern, replace_match, value)
+
+
+def get_agent_model_config(config: dict, agent_type: str) -> dict:
+    """Get model configuration for a specific agent type.
+
+    Agent-specific configurations take precedence over top-level model config.
+    When agent-specific model is None or not provided, falls back to top-level
+    model configuration.
+
+    Args:
+        config: Full configuration dictionary.
+        agent_type: Agent type name (e.g., 'summarizer', 'analyst', 'topic_analyst').
+
+    Returns:
+        Dictionary with model configuration for the specified agent.
+        If agent-specific config missing, returns deep copy of top-level model config.
+
+    Raises:
+        ConfigError: If agent_type is not a known agent type.
+    """
+    known_agents = {
+        "summarizer",
+        "stage_synthesizer",
+        "analyst",
+        "auditor",
+        "topic_analyst",
+        "entity_analyst",
+        "sentiment_analyst",
+        "timeline_analyst",
+    }
+
+    if agent_type not in known_agents:
+        raise ConfigError(
+            f"Unknown agent type '{agent_type}'. Supported: {', '.join(known_agents)}"
+        )
+
+    agents_config = config.get("agents", {})
+    agent_config = agents_config.get(agent_type, {})
+
+    # If agent has explicit model config, return it
+    if agent_config and "model" in agent_config and agent_config["model"] is not None:
+        return _deep_copy(agent_config["model"])
+
+    # Fall back to top-level model config
+    model_config = config.get("model", {})
+    return _deep_copy(model_config)
 
 
 def merge_env_overrides(config: dict) -> dict:

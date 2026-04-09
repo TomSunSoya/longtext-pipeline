@@ -9,6 +9,7 @@ import os
 import tempfile
 import random
 import string
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -37,6 +38,7 @@ class ManifestManager:
             base_dir: Base output directory. Defaults to current directory.
         """
         self.base_dir = Path(base_dir) if base_dir else Path.cwd()
+        self._lock = threading.Lock()
 
     def _get_manifest_path(self, input_path: str) -> Path:
         """
@@ -197,6 +199,8 @@ class ManifestManager:
         """
         Load manifest from .longtext/manifest.json for a given input file.
 
+        Thread-safe for concurrent reads alongside async writes.
+
         Args:
             input_path: Path to input file
 
@@ -225,6 +229,8 @@ class ManifestManager:
         2. Sync to disk
         3. Rename to target path
 
+        Thread-safe with threading.Lock for concurrent operations.
+
         Args:
             manifest: Manifest object to save
 
@@ -240,18 +246,21 @@ class ManifestManager:
         data = self._convert_to_dict(manifest)
         json_content = json.dumps(data, indent=2, ensure_ascii=False)
 
-        try:
-            # Atomic write using the utilities module
-            write_file(str(manifest_path), json_content)
-        except Exception as e:
-            raise ManifestError(f"Failed to save manifest to {manifest_path}: {e}")
+        with self._lock:
+            try:
+                # Atomic write using the utilities module
+                write_file(str(manifest_path), json_content)
+            except Exception as e:
+                raise ManifestError(f"Failed to save manifest to {manifest_path}: {e}")
 
     def update_stage(self, manifest: Manifest, stage_name: str,
-                     status: str, output_file: Optional[str] = None,
-                     error: Optional[str] = None,
-                     stats: Optional[Dict[str, Any]] = None) -> None:
+                      status: str, output_file: Optional[str] = None,
+                      error: Optional[str] = None,
+                      stats: Optional[Dict[str, Any]] = None) -> None:
         """
         Update stage progress in manifest.
+
+        Thread-safe for concurrent reads alongside async writes.
 
         Args:
             manifest: Manifest to update
@@ -291,6 +300,8 @@ class ManifestManager:
     def should_resume(self, manifest: Manifest, input_hash: str) -> bool:
         """
         Validate if checkpoint is fresh based on input hash.
+
+        Thread-safe for concurrent reads alongside async writes.
 
         Args:
             manifest: Loaded manifest to check

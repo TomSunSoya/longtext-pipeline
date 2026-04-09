@@ -19,7 +19,7 @@ from ..errors import (
     LLMCommunicationError,
     LLMResponseError,
 )
-from ..utils.retry import retry_llm_call
+from ..utils.retry import retry_llm_call, retry_llm_call_async
 from .base import LLMClient
 
 
@@ -83,6 +83,10 @@ class OpenAICompatibleClient(LLMClient):
             self.base_url = f"{self.base_url}/v1"
         
         self._endpoint = f"{self.base_url}/chat/completions"
+        
+        # Initialize async client params (same config as sync)
+        # Store timeout separately for httpx.AsyncClient
+        self._async_timeout = httpx.Timeout(timeout)
     
     def _build_headers(self) -> dict:
         """Build HTTP headers for requests."""
@@ -315,3 +319,200 @@ class OpenAICompatibleClient(LLMClient):
             raise LLMResponseError(
                 f"Failed to parse response structure: {e}"
             ) from e
+
+    async def _async_make_request(
+        self,
+        payload: dict,
+    ) -> dict:
+        """Make async HTTP request to the API.
+        
+        Args:
+            payload: Request payload dictionary
+            
+        Returns:
+            Parsed JSON response
+            
+        Raises:
+            LLMTimeoutError: On request timeout
+            LLMCommunicationError: On network errors
+            LLMError: On API errors
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self._async_timeout, trust_env=False) as client:
+                response = await client.post(
+                    self._endpoint,
+                    headers=self._build_headers(),
+                    json=payload,
+                )
+                
+                if response.status_code != 200:
+                    self._handle_error(response.status_code, response.text)
+                
+                return response.json()
+                
+        except httpx.TimeoutException as e:
+            raise LLMTimeoutError(
+                f"Request timed out after {self.timeout} seconds"
+            ) from e
+        except httpx.NetworkError as e:
+            raise LLMCommunicationError(
+                f"Network error: {e}"
+            ) from e
+        except httpx.HTTPError as e:
+            raise LLMCommunicationError(
+                f"HTTP error: {e}"
+            ) from e
+        except json.JSONDecodeError as e:
+            raise LLMResponseError(
+                f"Invalid JSON response from API: {e}"
+            ) from e
+
+    @retry_llm_call_async(max_retries=3, backoff_factor=2.0)
+    async def _async_complete(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Internal async completion method.
+        
+        Args:
+            prompt: The user prompt to send to the LLM
+            system_prompt: Optional system prompt to set context/behavior
+            
+        Returns:
+            The generated text response as a string
+            
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+        """
+        payload = self._build_payload(prompt, system_prompt)
+        response_data = await self._async_make_request(payload)
+        
+        # Extract content from response
+        try:
+            choices = response_data.get("choices", [])
+            if not choices:
+                raise LLMResponseError("No choices in response")
+            
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                raise LLMResponseError("Empty content in response")
+            
+            return content
+            
+        except (KeyError, TypeError) as e:
+            raise LLMResponseError(
+                f"Failed to parse response structure: {e}"
+            ) from e
+
+    async def acomplete(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Async generate a completion response from the LLM.
+        
+        Args:
+            prompt: The user prompt to send to the LLM
+            system_prompt: Optional system prompt to set context/behavior
+            
+        Returns:
+            The generated text response as a string
+            
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+        """
+        return await self._async_complete(prompt, system_prompt)
+
+    @retry_llm_call_async(max_retries=3, backoff_factor=2.0)
+    async def _async_complete_json(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> dict:
+        """Internal async JSON completion method.
+        
+        Args:
+            prompt: The user prompt requesting structured output
+            system_prompt: Optional system prompt (can include JSON format instructions)
+            
+        Returns:
+            Parsed JSON response as a Python dictionary
+            
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+            LLMResponseError: If response cannot be parsed as valid JSON
+        """
+        # Add JSON format instructions to system prompt
+        json_instruction = (
+            "Respond ONLY with valid JSON. Do not include any explanatory text, "
+            "markdown formatting, or code blocks. Your entire response must be "
+            "a valid JSON object that can be parsed directly."
+        )
+        
+        if system_prompt:
+            system_prompt = f"{system_prompt}\n\n{json_instruction}"
+        else:
+            system_prompt = json_instruction
+        
+        payload = self._build_payload(prompt, system_prompt, response_format="json")
+        response_data = await self._async_make_request(payload)
+        
+        # Extract and parse content
+        try:
+            choices = response_data.get("choices", [])
+            if not choices:
+                raise LLMResponseError("No choices in response")
+            
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                return {}
+            
+            # Parse JSON from response
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                raise LLMResponseError(
+                    f"Invalid JSON in response: {e}. Content: {content[:200]}"
+                ) from e
+                
+        except (KeyError, TypeError) as e:
+            raise LLMResponseError(
+                f"Failed to parse response structure: {e}"
+            ) from e
+
+    async def acomplete_json(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> dict:
+        """Async generate a structured JSON response from the LLM.
+        
+        Args:
+            prompt: The user prompt requesting structured output
+            system_prompt: Optional system prompt (can include JSON format instructions)
+            
+        Returns:
+            Parsed JSON response as a Python dictionary
+            
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+            LLMResponseError: If response cannot be parsed as valid JSON
+        """
+        return await self._async_complete_json(prompt, system_prompt)

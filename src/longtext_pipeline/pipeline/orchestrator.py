@@ -7,6 +7,7 @@ handles input validation, configuration loading, manifest management, resume
 capabilities, and error handling with the Continue-with-Partial strategy.
 """
 
+import asyncio
 import os
 import traceback
 from datetime import datetime
@@ -49,8 +50,11 @@ class LongtextPipeline:
     3. Stage: Synthesize multiple summaries
     4. Final: Create comprehensive analysis
     5. Audit: Optional verification of results
-    """
     
+    Async stages (summarize, stage synthesis, final) are run via asyncio.run()
+    to enable concurrent LLM calls within each stage.
+    """
+
     def __init__(self):
         """Initialize the pipeline orchestrator."""
         self.manifest_manager = ManifestManager()
@@ -61,7 +65,10 @@ class LongtextPipeline:
         input_path: str,
         config_path: Optional[str] = None,
         mode: str = "general",
-        resume: bool = False
+        resume: bool = False,
+        multi_perspective: bool = False,
+        specialist_count: Optional[int] = None,
+        max_workers: Optional[int] = None,
     ) -> FinalAnalysis:
         """
         Execute the entire processing pipeline from input to final analysis.
@@ -71,6 +78,9 @@ class LongtextPipeline:
             config_path: Optional path to config file (uses defaults if None)
             mode: Analysis mode ("general" or "relationship")
             resume: Whether to resume from existing checkpoints
+            multi_perspective: Whether to use multi-perspective parallel specialist agents
+            specialist_count: Optional number of final-analysis specialist agents to run
+            max_workers: Optional maximum concurrent workers for summarize and stage stages
              
         Returns:
             FinalAnalysis object with results and error tracking
@@ -88,6 +98,19 @@ class LongtextPipeline:
             
             # 2. Load config from file or use defaults with env overrides
             config = self._load_and_validate_config(config_path, mode)
+            
+            # 2.1 Add runtime flags to config based on parameters
+            config['multi_perspective'] = multi_perspective
+            if max_workers is not None:
+                if not isinstance(max_workers, int):
+                    raise ValueError("max_workers must be an integer.")
+                if not 1 <= max_workers <= 256:
+                    raise ValueError("max_workers must be between 1 and 256.")
+                config.setdefault("pipeline", {})
+                config["pipeline"]["max_workers"] = max_workers
+            if specialist_count is not None:
+                config.setdefault("pipeline", {})
+                config["pipeline"]["specialist_count"] = specialist_count
             
             # 3. Initialize manifest manager
             manifest_manager = self.manifest_manager
@@ -115,7 +138,7 @@ class LongtextPipeline:
             else:
                 completed_stages = []
                 print("Not resuming - will process all stages")
-             
+
             # Track current stage for error reporting
             current_stage = None
             all_summaries = []
@@ -494,41 +517,44 @@ class LongtextPipeline:
         return result
     
     def _run_summarize_stage(
-        self, 
-        parts: List[Part], 
-        config: dict, 
+        self,
+        parts: List[Part],
+        config: dict,
         manifest: Manifest,
         mode: str,
     ) -> list:  # Returns list of Summary objects
-        """Run the summarize stage and return summaries."""
+        """Run the summarize stage (async internally, sync interface)."""
         stage = SummarizeStage(manifest_manager=self.manifest_manager)
-        result = stage.run(parts, config, manifest, mode)
+        result = asyncio.run(stage.run(parts, config, manifest, mode))
         print(f"Successfully ran summarize stage for {len(parts)} parts")
         return result
-    
+
     def _run_stage_synthesis_stage(
-        self, 
+        self,
         summaries: list,  # List of Summary objects
-        config: dict, 
+        config: dict,
         manifest: Manifest,
         mode: str,
     ) -> list:  # Returns list of StageSummary objects
-        """Run the stage synthesis stage and return stage summaries."""
+        """Run the stage synthesis stage (async internally, sync interface)."""
         stage = StageSynthesisStage(manifest_manager=self.manifest_manager)
-        result = stage.run(summaries, config, manifest, mode)
+        result = asyncio.run(stage.run(summaries, config, manifest, mode))
         print(f"Successfully ran stage synthesis stage for {len(summaries)} summaries")
         return result
-    
+
     def _run_final_analysis_stage(
-        self, 
+        self,
         stages: list,  # List of StageSummary objects
-        config: dict, 
+        config: dict,
         manifest: Manifest,
         mode: str,
     ) -> FinalAnalysis:
-        """Run the final analysis stage and return final analysis."""
+        """Run the final analysis stage (async internally, sync interface)."""
         stage = FinalAnalysisStage(manifest_manager=self.manifest_manager)
-        result = stage.run(stages, config, manifest, mode)
+        multi_perspective = config.get("multi_perspective", False)
+        result = asyncio.run(
+            stage.run(stages, config, manifest, mode, multi_perspective=multi_perspective)
+        )
         print(f"Successfully ran final analysis stage for {len(stages)} stages")
         return result
     

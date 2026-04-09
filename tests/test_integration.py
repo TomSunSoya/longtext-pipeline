@@ -10,15 +10,32 @@ import os
 import pytest
 import tempfile
 import shutil
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import AsyncMock, patch, MagicMock, Mock
 
 from src.longtext_pipeline.pipeline.orchestrator import LongtextPipeline
 from src.longtext_pipeline.manifest import ManifestManager, Manifest
 from src.longtext_pipeline.models import Part, Summary, StageSummary, FinalAnalysis
 from src.longtext_pipeline.llm.openai_compatible import OpenAICompatibleClient
 from src.longtext_pipeline.errors import StageFailedError, InputError
+
+
+@contextmanager
+def patch_pipeline_llm_client(mock_client):
+    """Patch all stage-level client factory seams used by the orchestrator."""
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.summarize.get_llm_client", return_value=mock_client)
+        )
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.stage_synthesis.get_llm_client", return_value=mock_client)
+        )
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=mock_client)
+        )
+        yield
 
 
 # =============================================================================
@@ -155,25 +172,29 @@ def create_mock_llm_client(responses: dict, fail_on_call: int = None):
     """
     mock_client = Mock(spec=OpenAICompatibleClient)
     call_count = [0]  # Use list to allow mutation in closure
-    
+
+    def select_response(prompt: str) -> str:
+        if "--- Stage " in prompt:
+            return responses["final_analysis"]
+        if "--- Summary " in prompt:
+            return responses["stage_synthesis"]
+        return responses["summary"]
+
     def complete_side_effect(prompt):
         call_count[0] += 1
         if fail_on_call and call_count[0] == fail_on_call:
             from src.longtext_pipeline.errors import LLMError
             raise LLMError(f"Mock LLM failure on call {call_count[0]}")
-        
-        # Determine response type based on prompt content
-        # Summarize stage has shorter prompts (part content only)
-        if len(prompt) < 2000:
-            return responses["summary"]
-        # Stage synthesis has medium prompts with multiple summaries
-        elif "Part" in prompt and "Summary" in prompt:
-            return responses["stage_synthesis"]
-        # Final analysis has the longest prompt with all stage content
-        else:
-            return responses["final_analysis"]
-    
+
+        return select_response(prompt)
+
+    async def acomplete_side_effect(prompt, system_prompt=None):
+        return complete_side_effect(prompt)
+
     mock_client.complete.side_effect = complete_side_effect
+    mock_client.acomplete = AsyncMock(side_effect=acomplete_side_effect)
+    mock_client.acomplete_json = AsyncMock(return_value={"status": "ok"})
+    mock_client.model = "mock-model"
     return mock_client
 
 
@@ -198,8 +219,7 @@ class TestPipelineFullFlow:
         # Create mock LLM client
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Run pipeline
             result = pipeline.run(
@@ -255,8 +275,7 @@ class TestSingleStageFailure:
         # Fail on call 2, succeed on others
         mock_client = create_mock_llm_client(mock_llm_response, fail_on_call=2)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Run pipeline - should continue despite failures
             result = pipeline.run(
@@ -301,8 +320,7 @@ class TestPipelineResume:
         # First run - complete pipeline
         mock_client1 = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client1
+        with patch_pipeline_llm_client(mock_client1):
             
             result1 = pipeline.run(
                 input_path=sample_input_file,
@@ -324,8 +342,7 @@ class TestPipelineResume:
         # Second run with resume - should skip completed stages
         mock_client2 = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client2
+        with patch_pipeline_llm_client(mock_client2):
             
             # Capture print output to verify skip messages
             with patch('builtins.print') as mock_print:
@@ -360,8 +377,7 @@ class TestPipelineResume:
         # First run
         mock_client1 = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client1
+        with patch_pipeline_llm_client(mock_client1):
             pipeline.run(
                 input_path=sample_input_file,
                 config_path=None,
@@ -376,8 +392,7 @@ class TestPipelineResume:
         # Second run with resume - should detect change and restart
         mock_client2 = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client2
+        with patch_pipeline_llm_client(mock_client2):
             
             with patch('builtins.print') as mock_print:
                 pipeline.run(
@@ -414,8 +429,7 @@ class TestStageDependencies:
         """
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             result = pipeline.run(
                 input_path=sample_input_file,
@@ -465,8 +479,7 @@ class TestManifestIntegration:
         """
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             result = pipeline.run(
                 input_path=sample_input_file,
@@ -514,8 +527,7 @@ class TestManifestIntegration:
         """
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline.run(
                 input_path=sample_input_file,
@@ -553,8 +565,7 @@ class TestManifestIntegration:
         """
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Run pipeline
             pipeline.run(
@@ -623,8 +634,7 @@ class TestEdgeCases:
         
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Should handle tiny input gracefully
             result = pipeline.run(
@@ -700,8 +710,7 @@ class TestLLMMockIntegration:
         """Verify tests use mocked LLM and not real API."""
         mock_client = create_mock_llm_client(mock_llm_response)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             result = pipeline.run(
                 input_path=sample_input_file,
@@ -724,3 +733,4 @@ class TestLLMMockIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

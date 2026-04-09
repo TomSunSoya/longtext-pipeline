@@ -6,7 +6,7 @@ for hierarchical analysis.
 
 from typing import List
 
-from src.longtext_pipeline.models import Summary
+from .models import Summary
 
 
 class SummaryGrouper:

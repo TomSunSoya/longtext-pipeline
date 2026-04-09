@@ -10,8 +10,9 @@ import os
 import pytest
 import tempfile
 import shutil
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from unittest.mock import patch, MagicMock, Mock, call
+from unittest.mock import AsyncMock, patch, MagicMock, Mock, call
 from typer.testing import CliRunner
 
 from src.longtext_pipeline.pipeline.orchestrator import LongtextPipeline
@@ -119,6 +120,22 @@ Recommendations:
     }
 
 
+@contextmanager
+def patch_pipeline_llm_client(mock_client):
+    """Patch all stage-level client factory seams used by the orchestrator."""
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.summarize.get_llm_client", return_value=mock_client)
+        )
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.stage_synthesis.get_llm_client", return_value=mock_client)
+        )
+        stack.enter_context(
+            patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=mock_client)
+        )
+        yield
+
+
 def create_mock_llm_client(responses: dict, fail_after_calls: int = None):
     """Create a mock LLM client with configured responses.
     
@@ -131,21 +148,28 @@ def create_mock_llm_client(responses: dict, fail_after_calls: int = None):
     """
     mock_client = Mock(spec=OpenAICompatibleClient)
     call_count = [0]
-    
+
+    def select_response(prompt: str) -> str:
+        if "--- Stage " in prompt:
+            return responses["final_analysis"]
+        if "--- Summary " in prompt:
+            return responses["stage_synthesis"]
+        return responses["summary"]
+
     def complete_side_effect(prompt):
         call_count[0] += 1
         if fail_after_calls and call_count[0] > fail_after_calls:
             raise LLMError(f"Mock LLM failure after {fail_after_calls} calls")
-        
-        # Determine response type based on prompt content
-        if len(prompt) < 2000:
-            return responses["summary"]
-        elif "Part" in prompt and "Summary" in prompt:
-            return responses["stage_synthesis"]
-        else:
-            return responses["final_analysis"]
-    
+
+        return select_response(prompt)
+
+    async def acomplete_side_effect(prompt, system_prompt=None):
+        return complete_side_effect(prompt)
+
     mock_client.complete.side_effect = complete_side_effect
+    mock_client.acomplete = AsyncMock(side_effect=acomplete_side_effect)
+    mock_client.acomplete_json = AsyncMock(return_value={"status": "ok"})
+    mock_client.model = "mock-model"
     return mock_client
 
 
@@ -168,8 +192,7 @@ class TestEndToEndPipeline:
         # Create mock LLM client
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Run pipeline
             pipeline = LongtextPipeline()
@@ -230,8 +253,7 @@ class TestCLICommands:
         # Create mock LLM client
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             # Run CLI command
             result = runner.invoke(app, ["run", smoke_input_file])
@@ -247,6 +269,42 @@ class TestCLICommands:
         manifest_manager = ManifestManager()
         manifest = manifest_manager.load_manifest(smoke_input_file)
         assert manifest is not None
+
+    def test_cli_run_agent_count_enables_multi_perspective(self, runner, smoke_input_file):
+        """Providing --agent-count should enable multi-perspective mode automatically."""
+        final_analysis = FinalAnalysis(
+            status="completed",
+            stages=[],
+            final_result="ok",
+            metadata={},
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch("src.longtext_pipeline.cli.LongtextPipeline.run", return_value=final_analysis) as mock_run:
+                result = runner.invoke(app, ["run", smoke_input_file, "--agent-count", "2"])
+
+        assert result.exit_code == 0, f"CLI failed with: {result.output}"
+        assert "Multi-perspective: True" in result.output
+        assert "Specialist agent count: 2" in result.output
+        assert mock_run.call_args.kwargs["multi_perspective"] is True
+        assert mock_run.call_args.kwargs["specialist_count"] == 2
+
+    def test_cli_run_max_workers_passes_runtime_override(self, runner, smoke_input_file):
+        """Providing --max-workers should override pipeline.max_workers for this run."""
+        final_analysis = FinalAnalysis(
+            status="completed",
+            stages=[],
+            final_result="ok",
+            metadata={},
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with patch("src.longtext_pipeline.cli.LongtextPipeline.run", return_value=final_analysis) as mock_run:
+                result = runner.invoke(app, ["run", smoke_input_file, "--max-workers", "256"])
+
+        assert result.exit_code == 0, f"CLI failed with: {result.output}"
+        assert "Max workers: 256" in result.output
+        assert mock_run.call_args.kwargs["max_workers"] == 256
     
     def test_cli_status_command(self, runner, smoke_input_file, mock_llm_responses, temp_dir):
         """Test 'longtext status' CLI command works end-to-end.
@@ -259,8 +317,7 @@ class TestCLICommands:
         # First run the pipeline to create manifest
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             runner.invoke(app, ["run", smoke_input_file])
         
         # Now check status
@@ -307,8 +364,7 @@ class TestManifestManagement:
         """Verify manifest is created when pipeline starts."""
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -330,8 +386,7 @@ class TestManifestManagement:
         """Verify manifest is updated after each stage completes."""
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -356,8 +411,7 @@ class TestManifestManagement:
         """Verify manifest stores correct input hash for validation."""
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -386,8 +440,7 @@ class TestManifestManagement:
         """Verify manifest is properly persisted to disk as valid JSON."""
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -426,8 +479,7 @@ class TestResumeFunctionality:
         # First run - complete pipeline
         mock_client1 = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client1
+        with patch_pipeline_llm_client(mock_client1):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -445,8 +497,7 @@ class TestResumeFunctionality:
         # Second run with resume
         mock_client2 = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client2
+        with patch_pipeline_llm_client(mock_client2):
             
             with patch('builtins.print') as mock_print:
                 pipeline.run(
@@ -477,8 +528,7 @@ class TestResumeFunctionality:
         # First run
         mock_client1 = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client1
+        with patch_pipeline_llm_client(mock_client1):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -500,8 +550,7 @@ class TestResumeFunctionality:
         # Second run with resume - should detect change
         mock_client2 = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client2
+        with patch_pipeline_llm_client(mock_client2):
             
             with patch('builtins.print') as mock_print:
                 pipeline.run(
@@ -534,8 +583,7 @@ class TestResumeFunctionality:
         # First run - fail during summarize stage
         mock_client1 = create_mock_llm_client(mock_llm_responses, fail_after_calls=1)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client1
+        with patch_pipeline_llm_client(mock_client1):
             
             pipeline = LongtextPipeline()
             try:
@@ -557,8 +605,7 @@ class TestResumeFunctionality:
         # Second run - complete with resume
         mock_client2 = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client2
+        with patch_pipeline_llm_client(mock_client2):
             
             pipeline.run(
                 input_path=smoke_input_file,
@@ -583,8 +630,7 @@ class TestOutputFileValidation:
         """Verify output directory has correct structure."""
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             pipeline.run(
@@ -612,8 +658,7 @@ class TestOutputFileValidation:
         """
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             result = pipeline.run(
@@ -664,8 +709,7 @@ class TestEdgeCases:
         
         mock_client = create_mock_llm_client(mock_llm_responses)
         
-        with patch('src.longtext_pipeline.pipeline.orchestrator.get_llm_client') as mock_factory:
-            mock_factory.return_value = mock_client
+        with patch_pipeline_llm_client(mock_client):
             
             pipeline = LongtextPipeline()
             result = pipeline.run(
@@ -685,3 +729,5 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+

@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [project.scripts]
@@ -34,6 +35,7 @@ where = ["src"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["src/longtext_pipeline"]

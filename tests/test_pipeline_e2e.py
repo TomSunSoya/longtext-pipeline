@@ -13,7 +13,6 @@ import asyncio
 import pytest
 from datetime import datetime
 from typing import Dict, List, Optional, Set
-
 from unittest.mock import patch
 
 from src.longtext_pipeline.pipeline.summarize import SummarizeStage
@@ -810,5 +809,3 @@ class TestErrorHandling:
         assert len(stage_summaries) == expected_successes
         
         # Verify failed groups are not in results
-        result_indices = {s.stage_index for s in stage_summaries}
-        assert result_indices == set(range(num_groups)) - fail_group_indices

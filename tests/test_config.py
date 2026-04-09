@@ -1,11 +1,14 @@
 """Tests for configuration loading and local auto-discovery."""
 
+import pytest
 from pathlib import Path
 
 from src.longtext_pipeline.config import (
     AUTO_CONFIG_FILENAMES,
+    ConfigError,
     find_auto_config_path,
     format_missing_settings_message,
+    get_agent_model_config,
     get_missing_required_settings,
     load_runtime_config,
 )
@@ -75,3 +78,109 @@ def test_format_missing_settings_message_mentions_local_config():
     assert "model.api_key" in message
     assert "longtext.local.yaml" in message
     assert "OPENAI_API_KEY" in message
+
+
+def test_agents_config_section_loads():
+    """Multi-agent config with agents section should load correctly."""
+    config, _ = load_runtime_config("examples/config.multi_agent.yaml")
+
+    # Check agents section exists
+    assert "agents" in config
+    agents = config["agents"]
+
+    # Check all agent types are present
+    assert "summarizer" in agents
+    assert "stage_synthesizer" in agents
+    assert "analyst" in agents
+    assert "auditor" in agents
+
+    # Check agent has model config
+    assert "model" in agents["summarizer"]
+    assert agents["summarizer"]["model"]["name"] == "gpt-4o-mini"
+
+
+def test_get_agent_model_config_returns_explicit_config():
+    """get_agent_model_config should return agent-specific model config when present."""
+    config, _ = load_runtime_config("examples/config.multi_agent.yaml")
+
+    summarizer_config = get_agent_model_config(config, "summarizer")
+    stage_synthesizer_config = get_agent_model_config(config, "stage_synthesizer")
+
+    # Summarizer has explicit config
+    assert summarizer_config["name"] == "gpt-4o-mini"
+    assert summarizer_config["temperature"] == 0.7
+
+    # Stage synthesizer has different explicit config
+    assert stage_synthesizer_config["name"] == "gpt-4o"
+    assert stage_synthesizer_config["temperature"] == 0.5
+
+
+def test_get_agent_model_config_falls_back_to_top_level():
+    """get_agent_model_config should fall back to top-level model when agent has no explicit config."""
+    config, _ = load_runtime_config("examples/config.default.yaml")
+
+    summarizer_config = get_agent_model_config(config, "summarizer")
+    top_level_model = config.get("model", {})
+
+    # Should be a deep copy of top-level model
+    assert summarizer_config == top_level_model
+    assert summarizer_config is not top_level_model  # Deep copy assertion
+
+
+def test_get_agent_model_config_raises_for_unknown_agent():
+    """get_agent_model_config should raise ConfigError for unknown agent type."""
+    config = {"model": {"provider": "openai", "name": "gpt-4o-mini"}}
+
+    with pytest.raises(ConfigError) as exc_info:
+        get_agent_model_config(config, "unknown_agent")
+
+    assert "unknown_agent" in str(exc_info.value)
+    assert "summarizer" in str(exc_info.value)
+
+
+def test_validate_config_warns_on_unknown_agent():
+    """validate_config should warn about unknown agent types."""
+    import warnings
+
+    config = {
+        "model": {"provider": "openai", "name": "gpt-4o-mini"},
+        "agents": {
+            "unknown_agent": {"model": {"name": "gpt-4o"}},
+            "summarizer": {"model": {"name": "gpt-4o-mini"}},
+        },
+    }
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        from src.longtext_pipeline.config import validate_config
+
+        result = validate_config(config)
+
+        assert result is True
+        # Should have at least one warning for unknown_agent
+        unknown_warnings = [
+            warning for warning in w if "unknown_agent" in str(warning.message)
+        ]
+        assert len(unknown_warnings) >= 1
+
+
+def test_validate_config_accepts_specialist_count_without_warning():
+    """specialist_count should be a known pipeline config key."""
+    import warnings
+
+    config = {
+        "model": {"provider": "openai", "name": "gpt-4o-mini"},
+        "pipeline": {"max_workers": 4, "specialist_count": 2},
+    }
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        from src.longtext_pipeline.config import validate_config
+
+        result = validate_config(config)
+
+    assert result is True
+    matching = [
+        warning for warning in w if "specialist_count" in str(warning.message)
+    ]
+    assert matching == []

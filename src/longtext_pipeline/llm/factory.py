@@ -8,12 +8,14 @@ and provides a clean interface for future provider expansion.
 import os
 from typing import Optional
 
+from ..config import get_agent_model_config
 from .base import LLMClient
 from .openai_compatible import OpenAICompatibleClient
 
 
 def get_llm_client(
     config: dict,
+    agent_type: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -27,66 +29,82 @@ def get_llm_client(
     
     Configuration precedence (highest to lowest):
     1. Explicit function arguments
-    2. Config dictionary values
-    3. Environment variables
-    4. Provider defaults
+    2. Agent-specific config (config.agents.{agent_type}.model) if agent_type provided
+    3. Config dictionary values
+    4. Environment variables
+    5. Provider defaults
     
     Args:
         config: Configuration dictionary containing LLM settings
+        agent_type: Optional agent type for agent-specific model lookup
+                   (e.g., 'summarizer', 'stage_synthesizer', 'analyst', 'auditor').
+                   When provided, uses config.agents.{agent_type}.model if available,
+                   falling back to config.model. When None, uses config.model directly.
         model: Model name override (default: from config or env)
         api_key: API key override (default: from config or env)
         base_url: Base URL override (default: from config or env)
         timeout: Timeout override in seconds (default: from config or 30.0)
-        
+
     Returns:
         Configured LLMClient instance (OpenAICompatibleClient for MVP)
         
     Raises:
         ValueError: If an unsupported provider is specified
         TypeError: If config is not a dictionary
+        ConfigError: If agent_type is provided but unknown
         
     Example:
         >>> config = {
         ...     "model": "gpt-4o-mini",
-        ...     "timeout": 60.0
+        ...     "agents": {
+        ...         "summarizer": {"model": {"name": "claude-sonnet"}}
+        ...     }
         ... }
-        >>> client = get_llm_client(config)
-        >>> response = client.complete("Hello!")
+        >>> client = get_llm_client(config)  # Uses gpt-4o-mini
+        >>> summarizer_client = get_llm_client(config, agent_type='summarizer')  # Uses claude-sonnet
     """
     if not isinstance(config, dict):
         raise TypeError(f"config must be a dictionary, got {type(config).__name__}")
     
-    # Extract values from config with environment variable fallbacks
+    # Get model config based on agent_type (if provided)
+    if agent_type is not None:
+        # Use agent-specific model config with fallback to top-level model config
+        model_config = get_agent_model_config(config, agent_type)
+    else:
+        # Use top-level model config directly
+        model_config = config.get("model", config)
+    
+    # Extract values from model_config with environment variable fallbacks
     # Use OpenAICompatibleClient defaults when no value is provided
     resolved_model = (
         model
-        or config.get("model")
-        or config.get("name")
+        or model_config.get("model")
+        or model_config.get("name")
         or os.getenv("LONGTEXT_MODEL_NAME")
         or OpenAICompatibleClient.DEFAULT_MODEL
     )
     
     resolved_api_key = (
         api_key
-        or config.get("api_key")
+        or model_config.get("api_key")
         or os.getenv("OPENAI_API_KEY")
     )
     
     resolved_base_url = (
         base_url
-        or config.get("base_url")
+        or model_config.get("base_url")
         or os.getenv("OPENAI_BASE_URL")
         or OpenAICompatibleClient.DEFAULT_BASE_URL
     )
     
     resolved_timeout = (
         timeout
-        or config.get("timeout")
+        or model_config.get("timeout")
         or OpenAICompatibleClient.DEFAULT_TIMEOUT
     )
     
     # Determine provider (default to "openai" for MVP)
-    provider = config.get("provider", "openai").lower()
+    provider = model_config.get("provider", "openai").lower()
     
     # Create appropriate client based on provider
     # MVP only supports OpenAI-compatible providers

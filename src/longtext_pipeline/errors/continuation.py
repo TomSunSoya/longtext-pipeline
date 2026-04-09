@@ -6,6 +6,7 @@ specifically for improved continued execution strategies, complementing
 the base error types in the parent errors.py module.
 """
 
+import threading
 from typing import Any, List, Union, Optional
 from dataclasses import dataclass
 
@@ -70,28 +71,31 @@ class ErrorAggregator:
             "recovery_success": [],
             "recovery_failed": [],
         }
+        self._lock = threading.Lock()
     
     def add_errors(self, stage_name: str, errors: List[Union[Exception, str]]) -> None:
         """Add errors for a specific stage."""
-        if stage_name not in self.errors:
-            self.errors[stage_name] = []
-        
         # Convert exceptions to strings
         new_errors = [
             str(error) if isinstance(error, Exception) else error 
             for error in errors
         ]
         
-        self.errors[stage_name].extend(new_errors)
-        self.stats["total_errors"] += len(new_errors)
-        self.stats["stages_with_errors"].add(stage_name)
+        with self._lock:
+            if stage_name not in self.errors:
+                self.errors[stage_name] = []
+            
+            self.errors[stage_name].extend(new_errors)
+            self.stats["total_errors"] += len(new_errors)
+            self.stats["stages_with_errors"].add(stage_name)
         
     def add_warning(self, stage_name: str, warning: str) -> None:
         """Add a warning for a specific stage."""
-        if stage_name not in self.warnings:
-            self.warnings[stage_name] = []
+        with self._lock:
+            if stage_name not in self.warnings:
+                self.warnings[stage_name] = []
             
-        self.warnings[stage_name].append(warning)
+            self.warnings[stage_name].append(warning)
         
     def get_stage_summary(self, stage_name: str) -> dict:
         """Get error/warning summary for a specific stage."""
@@ -121,11 +125,12 @@ class ErrorAggregator:
         
     def clear(self) -> None:
         """Clear all aggregated errors."""
-        self.errors.clear()
-        self.warnings.clear()
-        self.stats = {
-            "total_errors": 0,
-            "stages_with_errors": set(),
-            "recovery_success": [],
-            "recovery_failed": [],
-        }
+        with self._lock:
+            self.errors.clear()
+            self.warnings.clear()
+            self.stats = {
+                "total_errors": 0,
+                "stages_with_errors": set(),
+                "recovery_success": [],
+                "recovery_failed": [],
+            }

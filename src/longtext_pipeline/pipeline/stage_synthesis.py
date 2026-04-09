@@ -9,7 +9,7 @@ for grouping summaries. Implements Continue-with-Partial error handling to
 maximize throughput despite individual group failures.
 """
 
-import os
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -71,7 +71,7 @@ class StageSynthesisStage:
                 f"Ensure {prompt_file} exists in the prompts directory."
             )
     
-    def _synthesize_group(
+    async def _synthesize_group(
         self,
         group: List[Summary],
         group_index: int,
@@ -103,8 +103,8 @@ class StageSynthesisStage:
         # Build full prompt by appending summaries content
         full_prompt = prompt_template + summaries_text
         
-        # Call LLM to generate synthesis
-        response = client.complete(full_prompt)
+        # Call LLM to generate synthesis (async)
+        response = await client.acomplete(full_prompt)
         
         # Parse response into StageSummary object
         timestamp = datetime.now()
@@ -163,47 +163,51 @@ _Stage synthesized by {model} ({timestamp})_
         write_file(str(stage_path), stage_content)
         return str(stage_path)
     
-    def run(
+    async def run(
         self,
         summaries: List[Summary],
         config: Dict,
         manifest: Manifest,
-        mode: str = "general"
+        mode: str = "general",
     ) -> List[StageSummary]:
-        """Run the stage synthesis stage on all summaries.
-        
+        """Async run the stage synthesis stage on all summaries.
+
         Args:
             summaries: List of Summary objects from summarize stage
             config: Configuration dictionary with LLM settings and group_size
             manifest: Manifest object to update
             mode: Analysis mode ('general' or 'relationship')
-            
+
         Returns:
             List of StageSummary objects for successfully processed groups
-            
+
         Raises:
             StageFailedError: If all groups fail (but may contain partial results)
         """
-        # Validate mode parameter
         if mode not in ("general", "relationship"):
             raise ValueError(
                 f"Invalid mode: '{mode}'. Must be 'general' or 'relationship'."
             )
-        
-        # Log experimental mode warning
+
         if mode == "relationship":
             print("[StageSynthesisStage] EXPERIMENTAL MODE: Relationship-focused analysis enabled")
-        
-        # Update manifest to indicate started stage stage
+
         self.manifest_manager.update_stage(manifest, 'stage', 'running')
-        
-        # Load prompt template
+
         prompt_template = self._load_prompt_template(mode)
-        
-        # Get group_size from config (default to 5 as per CONFIG.md)
+
         group_size = config.get('stages', {}).get('stage', {}).get('group_size', 5)
         print(f"[StageSynthesisStage] Using group_size: {group_size}")
-        
+
+        # Create LLM client using agent-specific model config for stage_synthesizer
+        client = get_llm_client(config, agent_type='stage_synthesizer')
+        model = getattr(client, "model", "unknown")
+
+        output_dir = Path(manifest.input_path).parent / ".longtext"
+        output_dir.mkdir(exist_ok=True)
+
+        max_workers = config.get('pipeline', {}).get('max_workers', 4)
+        semaphore = asyncio.Semaphore(max_workers)
         # Create grouper with configurable group_size
         grouper = SummaryGrouper(group_size=group_size)
         
@@ -231,63 +235,36 @@ _Stage synthesized by {model} ({timestamp})_
             self.manifest_manager.save_manifest(manifest)
             return []
         
-        # Create LLM client from the model subsection when full config is provided.
-        model_config = config.get('model', config)
-        client = get_llm_client(model_config)
-        model = model_config.get('name') or model_config.get('model') or 'unknown'
-        
-        # Determine output directory
-        output_dir = Path(manifest.input_path).parent / ".longtext"
-        output_dir.mkdir(exist_ok=True)
-        
         # Track results and errors
         stage_summaries: List[StageSummary] = []
         saved_stage_paths: List[str] = []
         errors: List[Dict] = []
         
-        # Process each group independently (Continue-with-Partial strategy)
-        for group_index, group in enumerate(groups):
-            try:
-                print(f"[StageSynthesisStage] Processing group {group_index} ({len(group)} summaries)...")
-                
-                # Synthesize group
-                stage_summary = self._synthesize_group(
-                    group=group,
-                    group_index=group_index,
-                    prompt_template=prompt_template,
-                    client=client,
-                    model=model
-                )
-                
-                # Add mode to metadata
-                stage_summary.metadata['mode'] = mode
-                
-                # Save stage summary to file
-                stage_path = self._save_stage_summary(stage_summary, output_dir)
-                saved_stage_paths.append(stage_path)
-                stage_summaries.append(stage_summary)
-                
-                print(f"[StageSynthesisStage] Completed group {group_index}: {stage_path}")
-                
-            except LLMError as e:
-                # Handle LLM error for this group - continue with others
-                error_info = {
-                    "index": group_index,
-                    "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
-                    "error": str(e)
-                }
-                errors.append(error_info)
-                print(f"[StageSynthesisStage] Failed group {group_index}: {e}")
-                
-            except Exception as e:
-                # Handle unexpected errors - continue with others
-                error_info = {
-                    "index": group_index,
-                    "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
-                    "error": f"Unexpected error: {str(e)}"
-                }
-                errors.append(error_info)
-                print(f"[StageSynthesisStage] Unexpected error on group {group_index}: {e}")
+        # Create process_group closure for use in both modes
+        process_group = self._make_process_group_processor(
+            prompt_template=prompt_template,
+            client=client,
+            model=model,
+            mode=mode,
+            output_dir=output_dir,
+            semaphore=semaphore
+        )
+        
+        # Schedule all groups for concurrent execution within semaphore limit
+        tasks = [process_group(group_index, group) for group_index, group in enumerate(groups)]
+        results = await asyncio.gather(*tasks)
+        
+        # Process results maintaining order from original groups list
+        for result in results:
+            stage_summary, stage_path, error = result
+            if error:
+                # Error occurred
+                errors.append(error)
+            else:
+                # Success case, add to appropriate lists
+                if stage_summary:
+                    stage_summaries.append(stage_summary)
+                    saved_stage_paths.append(stage_path)
         
         # Calculate statistics
         total_groups = len(groups)
@@ -344,5 +321,48 @@ _Stage synthesized by {model} ({timestamp})_
         manifest.updated_at = datetime.now()
         self.manifest_manager.save_manifest(manifest)
         
-        # Return successfully generated stage summaries
         return stage_summaries
+
+    def _make_process_group_processor(
+        self,
+        prompt_template: str,
+        client,
+        model: str,
+        mode: str,
+        output_dir: Path,
+        semaphore: asyncio.Semaphore
+    ):
+        """Create a closure for processing groups with captured context."""
+        async def process_group(group_index: int, group: List[Summary]):
+            async with semaphore:
+                try:
+                    print(f"[StageSynthesisStage] Processing group {group_index} ({len(group)} summaries)...")
+                    stage_summary = await self._synthesize_group(
+                        group=group,
+                        group_index=group_index,
+                        prompt_template=prompt_template,
+                        client=client,
+                        model=model
+                    )
+                    stage_summary.metadata['mode'] = mode
+                    stage_path = self._save_stage_summary(stage_summary, output_dir)
+                    print(f"[StageSynthesisStage] Completed group {group_index}: {stage_path}")
+                    return stage_summary, stage_path, None
+                except LLMError as e:
+                    error_info = {
+                        "index": group_index,
+                        "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
+                        "error": str(e)
+                    }
+                    print(f"[StageSynthesisStage] Failed group {group_index}: {e}")
+                    return None, "", error_info
+                except Exception as e:
+                    error_info = {
+                        "index": group_index,
+                        "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
+                        "error": f"Unexpected error: {str(e)}"
+                    }
+                    print(f"[StageSynthesisStage] Unexpected error on group {group_index}: {e}")
+                    return None, "", error_info
+
+        return process_group

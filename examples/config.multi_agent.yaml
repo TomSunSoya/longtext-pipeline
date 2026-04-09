@@ -1,0 +1,124 @@
+# Longtext Pipeline - Multi-Agent Configuration
+#
+# This configuration file demonstrates multi-agent support with
+# per-agent model specifications for parallel processing.
+#
+# Usage:
+#   longtext run <input-file> --config examples/config.multi_agent.yaml
+#
+# Environment variable overrides available:
+#   OPENAI_API_KEY       - API key for OpenAI service (recommended: set via env)
+#   OPENAI_BASE_URL      - Base URL for custom OpenAI-compatible endpoints
+#   LONGTEXT_MODEL_PROVIDER - Override default model provider
+#   LONGTEXT_MODEL_NAME  - Override default model name
+#   LONGTEXT_OUTPUT_DIR  - Override default output directory
+#   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+
+# =============================================================================
+# MODEL CONFIGURATION (default/fallback)
+# =============================================================================
+# Settings for the LLM provider and model used throughout the pipeline.
+# Agent-specific configs below override these when specified.
+model:
+  provider: "openai"        # Default provider
+  name: "gpt-4o-mini"      # Default model
+  base_url: null           # API endpoint URL
+  api_key: "${OPENAI_API_KEY}"  # API key (set via env var)
+  temperature: 0.7         # Default temperature
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+# Controls behavior of each processing stage in the pipeline.
+stages:
+  # Ingest stage splits input into manageable chunks
+  ingest:
+    chunk_size: 4000
+    overlap_rate: 0.1
+
+  # Summarize stage generates summaries for each chunk
+  summarize:
+    prompt_template: "prompts/summary_general.txt"
+    batch_size: 4
+
+  # Stage stage combines multiple summaries into higher-level summaries
+  stage:
+    group_size: 5
+    prompt_template: "prompts/stage_general.txt"
+
+  # Final stage produces cross-stage analysis
+  final:
+    prompt_template: "prompts/final_general.txt"
+
+  # Audit stage performs quality checks (optional)
+  audit:
+    enabled: false
+    prompt_template: "prompts/audit_general.txt"
+
+# =============================================================================
+# PROMPTS CONFIGURATION
+# =============================================================================
+prompts:
+  dir: "./src/longtext_pipeline/prompts"
+  format: "general"
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+output:
+  dir: "./output"
+  naming:
+    summarize_prefix: "summary_"
+    stage_prefix: "stage_"
+    final_filename: "final_analysis.md"
+  save_intermediate: true
+
+# =============================================================================
+# INPUT CONFIGURATION
+# =============================================================================
+input:
+  file_path: null
+  encoding: "utf-8"
+
+# =============================================================================
+# PIPELINE CONFIGURATION
+# =============================================================================
+pipeline:
+  allow_resume: true
+  audit_enabled: false
+  max_workers: 4
+
+# =============================================================================
+# AGENTS CONFIGURATION (NEW)
+# =============================================================================
+# Per-agent model specifications for multi-agent parallel processing.
+# Each agent can use a different model if needed.
+# When model is null or omitted, falls back to top-level model config.
+agents:
+  # Summarizer agent - for generating chunk summaries
+  summarizer:
+    model:
+      provider: "openai"      # Can override provider
+      name: "gpt-4o-mini"    # Fast model for summarization
+      temperature: 0.7       # Standard temperature for summarization
+
+  # Stage synthesizer - for combining summaries into stages
+  stage_synthesizer:
+    model:
+      provider: "openai"
+      name: "gpt-4o"         # Higher quality model for synthesis
+      temperature: 0.5       # Lower temperature for consistency
+
+  # Analyst agent - for multi-perspective analysis
+  analyst:
+    model:
+      provider: "openai"
+      name: "gpt-4o"         # High quality for analysis
+      temperature: 0.6       # Balanced for analytical thinking
+
+  # Auditor agent - for quality assurance and hallucination detection
+  auditor:
+    model:
+      provider: "openai"
+      name: "gpt-4o"         # highest quality for auditing
+      temperature: 0.0       # Deterministic for consistent auditing

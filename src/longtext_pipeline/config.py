@@ -7,9 +7,20 @@ override support following the hierarchical approach with defaults and env overr
 import os
 import re
 import warnings
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
+
+
+AUTO_CONFIG_FILENAMES = (
+    "longtext.local.yaml",
+    ".longtext.local.yaml",
+)
+
+
+class ConfigError(Exception):
+    """Raised when configuration loading or validation fails."""
 
 
 # Default configuration values (MVP)
@@ -20,6 +31,7 @@ DEFAULT_CONFIG = {
         "base_url": None,  # Will default to provider-specific base URL
         "api_key": None,  # Will be overridden by env var
         "temperature": 0.7,
+        "timeout": 120.0,
     },
     "stages": {
         "ingest": {
@@ -85,6 +97,13 @@ def load_config(path: Optional[str] = None) -> dict:
     if path is None:
         return _deep_copy(DEFAULT_CONFIG)
 
+    loaded = _load_yaml_file(path)
+    # Merge loaded config with defaults (loaded takes precedence)
+    return _deep_merge(DEFAULT_CONFIG, loaded)
+
+
+def _load_yaml_file(path: str | Path) -> dict:
+    """Load a YAML config file without applying defaults."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             loaded = yaml.safe_load(f) or {}
@@ -93,8 +112,78 @@ def load_config(path: Optional[str] = None) -> dict:
     except yaml.YAMLError as e:
         raise ConfigError(f"Invalid YAML in configuration file {path}: {e}")
 
-    # Merge loaded config with defaults (loaded takes precedence)
-    return _deep_merge(DEFAULT_CONFIG, loaded)
+    if not isinstance(loaded, dict):
+        raise ConfigError(
+            f"Configuration file must contain a YAML object at the top level: {path}"
+        )
+
+    return loaded
+
+
+def find_auto_config_path(start_dir: Optional[str | Path] = None) -> Optional[Path]:
+    """Search current directory and its parents for a local auto-loaded config file."""
+    current_dir = Path(start_dir or Path.cwd()).resolve()
+
+    for directory in [current_dir, *current_dir.parents]:
+        for filename in AUTO_CONFIG_FILENAMES:
+            candidate = directory / filename
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+    return None
+
+
+def load_runtime_config(
+    path: Optional[str] = None,
+    search_dir: Optional[str | Path] = None,
+) -> tuple[dict, list[str]]:
+    """Load runtime config from defaults, explicit config, local config, and env vars.
+
+    Precedence from low to high:
+    1. Built-in defaults
+    2. Explicit config passed via ``path``
+    3. Auto-discovered local config (for machine-local settings and secrets)
+    4. Environment variable overrides
+    """
+    config = _deep_copy(DEFAULT_CONFIG)
+    loaded_sources: list[str] = []
+    explicit_path = Path(path).resolve() if path else None
+
+    if explicit_path is not None:
+        config = _deep_merge(config, _load_yaml_file(explicit_path))
+        loaded_sources.append(str(explicit_path))
+
+    auto_path = find_auto_config_path(search_dir)
+    if auto_path is not None and (explicit_path is None or auto_path.resolve() != explicit_path):
+        config = _deep_merge(config, _load_yaml_file(auto_path))
+        loaded_sources.append(str(auto_path))
+
+    config = merge_env_overrides(config)
+    validate_config(config)
+    return config, loaded_sources
+
+
+def get_missing_required_settings(config: dict) -> list[str]:
+    """Return required runtime settings still missing after config resolution."""
+    missing: list[str] = []
+    model_config = config.get("model", {})
+
+    if not str(model_config.get("api_key") or "").strip():
+        missing.append("model.api_key")
+
+    return missing
+
+
+def format_missing_settings_message(missing: list[str]) -> str:
+    """Build a user-facing error message for missing required settings."""
+    if not missing:
+        return ""
+
+    suggestions = {
+        "model.api_key": "set `model.api_key` in `longtext.local.yaml` or export `OPENAI_API_KEY`",
+    }
+    detail = "; ".join(suggestions.get(item, item) for item in missing)
+    return f"Missing required configuration: {', '.join(missing)}. Please {detail}."
 
 
 def validate_config(config: dict) -> bool:
@@ -122,7 +211,7 @@ def validate_config(config: dict) -> bool:
     }
 
     # Known nested keys per section
-    known_model_keys = {"provider", "name", "base_url", "api_key", "temperature"}
+    known_model_keys = {"provider", "name", "base_url", "api_key", "temperature", "timeout"}
     known_ingest_keys = {"chunk_size", "overlap_rate"}
     known_summarize_keys = {"prompt_template", "batch_size"}
     known_stage_keys = {"group_size", "prompt_template"}

@@ -61,6 +61,7 @@ def get_llm_client(
     resolved_model = (
         model
         or config.get("model")
+        or config.get("name")
         or os.getenv("LONGTEXT_MODEL_NAME")
         or OpenAICompatibleClient.DEFAULT_MODEL
     )

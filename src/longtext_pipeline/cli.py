@@ -12,7 +12,14 @@ import typer
 import yaml
 from typing_extensions import Annotated
 
-from longtext_pipeline.config import DEFAULT_CONFIG, load_config, merge_env_overrides
+from longtext_pipeline.config import (
+    AUTO_CONFIG_FILENAMES,
+    DEFAULT_CONFIG,
+    ConfigError,
+    format_missing_settings_message,
+    get_missing_required_settings,
+    load_runtime_config,
+)
 from longtext_pipeline.utils.io import ensure_dir, write_file
 from longtext_pipeline.pipeline.orchestrator import LongtextPipeline
 from longtext_pipeline.manifest import ManifestManager
@@ -100,10 +107,13 @@ def run(
         # Step 1: Validate input file (exists, valid extension .txt/.md)
         input_path = _validate_input_file(input_file)
         
-        # Step 2: Load config from specified path or use defaults
-        loaded_config = load_config(config)
-        # Apply environment variable overrides
-        final_config = merge_env_overrides(loaded_config)
+        # Step 2: Load config from explicit config + auto-discovered local config + env overrides
+        final_config, loaded_sources = load_runtime_config(config, search_dir=Path.cwd())
+
+        missing_settings = get_missing_required_settings(final_config)
+        if missing_settings:
+            typer.echo(format_missing_settings_message(missing_settings), err=True)
+            return 1
         
         # Update prompts based on mode
         if "prompts" in final_config and mode == "relationship":
@@ -116,8 +126,10 @@ def run(
         print(f"Starting pipeline for: {input_path}")
         print(f"Mode: {mode}")
         print(f"Resume: {resume}")
-        if config:
-            print(f"Config file: {config}")
+        if loaded_sources:
+            print(f"Config sources: {', '.join(loaded_sources)}")
+        else:
+            print("Config sources: built-in defaults")
         print()
         
         # Step 5: Run pipeline with error handling
@@ -150,6 +162,9 @@ def run(
             return 1
             
     except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        return 1
+    except ConfigError as e:
         typer.echo(f"Error: {e}", err=True)
         return 1
     except ValueError as e:
@@ -321,6 +336,7 @@ def init(
         files_to_create = [
             ("config.general.yaml", config_general_content),
             ("config.relationship.yaml", config_relationship_content),
+            ("longtext.local.yaml", generate_local_config_template()),
             ("sample_input.txt", generate_sample_input_content()),
             ("README.md", generate_quickstart_readme_content()),
         ]
@@ -352,7 +368,7 @@ def init(
         print("\nTo get started:")
         print("- Review config.general.yaml for general analysis settings")
         print("- Review config.relationship.yaml for relationship-focused analysis")
-        print("- Customize API keys and model settings in configuration files")
+        print(f"- Put your local API/model settings in {AUTO_CONFIG_FILENAMES[0]} (auto-loaded on startup)")
         print("- Create your own input text file (.txt or .md)")
         print("- Run with: longtext run your_input.txt --config config.general.yaml")
         
@@ -418,6 +434,25 @@ def generate_config_relationship_template() -> str:
     config_copy["stages"]["audit"]["prompt_template"] = "prompts/audit_relationship.txt"
     
     return yaml.dump(config_copy, default_flow_style=False, indent=2)
+
+
+def generate_local_config_template() -> str:
+    """Generate a machine-local runtime config template that is auto-loaded on startup."""
+    local_config = {
+        "model": {
+            "provider": "openai",
+            "name": "deepseek-chat",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "REPLACE_WITH_API_KEY",
+            "temperature": 0.7,
+            "timeout": 120.0,
+        }
+    }
+    return (
+        "# Machine-local runtime config. This file is auto-loaded on startup\n"
+        "# and should stay out of git.\n"
+        + yaml.dump(local_config, default_flow_style=False, indent=2)
+    )
 
 
 def generate_sample_input_content() -> str:
@@ -488,12 +523,24 @@ This created several important files:
 ## Before Running Analysis
 
 1. **Set up your API key:**
-   Export your OpenAI API key as an environment variable:
+   Preferred: put your API/model settings in `longtext.local.yaml`.
+
+   Example:
+   ```yaml
+   model:
+     provider: "openai"
+     name: "deepseek-chat"
+     base_url: "https://api.deepseek.com/v1"
+     api_key: "your_api_key_here"
+     timeout: 120.0
+   ```
+
+   Or export your API key as an environment variable:
    ```bash
    export OPENAI_API_KEY="your_api_key_here"
    ```
 
-   Or edit the config files to directly specify your key.
+   `longtext.local.yaml` is auto-loaded on startup and is intended for local secrets.
 
 2. **Customize configuration:**
    Review `config.general.yaml` or `config.relationship.yaml` to adjust settings:

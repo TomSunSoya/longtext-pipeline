@@ -231,9 +231,10 @@ _Stage synthesized by {model} ({timestamp})_
             self.manifest_manager.save_manifest(manifest)
             return []
         
-        # Create LLM client
-        client = get_llm_client(config)
-        model = config.get('model', 'unknown')
+        # Create LLM client from the model subsection when full config is provided.
+        model_config = config.get('model', config)
+        client = get_llm_client(model_config)
+        model = model_config.get('name') or model_config.get('model') or 'unknown'
         
         # Determine output directory
         output_dir = Path(manifest.input_path).parent / ".longtext"

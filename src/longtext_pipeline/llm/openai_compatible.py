@@ -45,7 +45,7 @@ class OpenAICompatibleClient(LLMClient):
     """
     
     DEFAULT_BASE_URL = "https://api.openai.com/v1"
-    DEFAULT_TIMEOUT = 30.0
+    DEFAULT_TIMEOUT = 120.0
     DEFAULT_MODEL = "gpt-4o-mini"
     
     def __init__(
@@ -182,7 +182,9 @@ class OpenAICompatibleClient(LLMClient):
             LLMError: On API errors
         """
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            # Ignore ambient proxy environment variables unless the caller
+            # explicitly bakes proxying into the endpoint they provide.
+            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
                 response = client.post(
                     self._endpoint,
                     headers=self._build_headers(),

@@ -10,6 +10,7 @@ Configuration files are typically located in the `examples/` directory:
 
 - `examples/config.general.yaml` - General text analysis configuration
 - `examples/config.relationship.yaml` - Relationship-focused analysis configuration
+- `longtext.local.yaml` - Machine-local runtime config, auto-loaded on startup and intended for secrets/provider overrides
 
 The dual configuration approach supports the different analysis types as designed in the pipeline architecture, enabling both general text summarization and entity relationship mapping as outlined in the planned prompt templates (summary_general/relationship, stage_general/relationship, etc.).
 
@@ -118,6 +119,15 @@ pipeline:
 ```
 
 ## Environment Variable Overrides
+
+The runtime loader resolves configuration in this order:
+
+1. Built-in defaults
+2. Explicit config passed via `--config`
+3. Auto-discovered `longtext.local.yaml` (or `.longtext.local.yaml`) from the current directory or a parent directory
+4. Environment variable overrides
+
+This allows you to keep pipeline behavior in `examples/config.general.yaml` while storing local secrets and provider settings in `longtext.local.yaml`.
 
 The configuration system supports the following environment variables as secure alternatives to specifying values in YAML:
 

@@ -14,13 +14,16 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
-from ..config import load_config, merge_env_overrides
+from ..config import (
+    format_missing_settings_message,
+    get_missing_required_settings,
+    load_runtime_config,
+)
 from ..errors import StageFailedError
 from ..errors.continuation import ErrorAggregator, PartialResult
 from ..manifest import ManifestManager, Manifest
 from ..models import FinalAnalysis, Part
 from ..renderer import format_status
-from ..llm.factory import get_llm_client
 from .ingest import IngestStage
 from .summarize import SummarizeStage
 from .stage_synthesis import StageSynthesisStage
@@ -164,16 +167,14 @@ class LongtextPipeline:
                 if not resume or "summarize" not in completed_stages:
                     print(f"Starting {current_stage} stage...")
                     summaries_result = self._execute_stage_with_error_handling(
-                        self._run_summarize_stage, 
-                        [parts, config, manifest, input_hash], 
+                        self._run_summarize_stage,
+                        [parts, config, manifest, mode],
                         "summarize"
                     )
                     
                     if summaries_result.success and summaries_result.data is not None:
                         all_summaries = summaries_result.data
                         print(f"Summarize stage completed with {len(all_summaries)} summaries")
-                        # Save summaries to files
-                        self._save_summaries_to_files(all_summaries, input_path)
                     else:
                         all_summaries = []
                         if summaries_result.data is not None and len(summaries_result.data) > 0:
@@ -202,15 +203,13 @@ class LongtextPipeline:
                     print(f"Starting {current_stage} stage...")
                     synthesis_result = self._execute_stage_with_error_handling(
                         self._run_stage_synthesis_stage,
-                        [all_summaries, config, manifest, input_hash], 
+                        [all_summaries, config, manifest, mode],
                         "stage"
                     )
                     
                     if synthesis_result.success and synthesis_result.data is not None:
                         all_stages = synthesis_result.data
                         print(f"Stage synthesis completed with {len(all_stages)} stages")
-                        # Save stages to files
-                        self._save_stages_to_files(all_stages, input_path)
                     else:
                         all_stages = []
                         if synthesis_result.data is not None and len(synthesis_result.data) > 0:
@@ -239,15 +238,13 @@ class LongtextPipeline:
                     print(f"Starting {current_stage} stage...")
                     final_result = self._execute_stage_with_error_handling(
                         self._run_final_analysis_stage,
-                        [all_stages, config, manifest], 
+                        [all_stages, config, manifest, mode],
                         "final"
                     )
                     
                     if final_result.success and final_result.data is not None:
                         final_analysis = final_result.data
                         print("Final analysis stage completed successfully")
-                        # Save final analysis to file
-                        self._save_final_analysis_to_file(final_analysis, input_path)
                         
                         # Update manifest final metadata
                         final_analysis.metadata["completed_at"] = datetime.now().isoformat()
@@ -270,7 +267,8 @@ class LongtextPipeline:
                         if final_result.errors:
                             self.error_aggregator.add_errors(current_stage, final_result.errors) 
                         if final_result.warnings:
-                            self.error_aggregator.add_warnings(current_stage, final_result.warnings)
+                            for warning in final_result.warnings:
+                                self.error_aggregator.add_warning(current_stage, warning)
                             
                         # Flag as partial success or failed depending on severity
                         if final_result.success:
@@ -297,13 +295,14 @@ class LongtextPipeline:
                     print(f"Starting {current_stage} stage...")
                     audit_result = self._execute_stage_with_error_handling(
                         self._run_audit_stage,
-                        [final_analysis, config, manifest], 
+                        [final_analysis, config, manifest, mode],
                         "audit"
                     )
                     
                     if audit_result.success and audit_result.data is not None:
                         print("Audit stage completed successfully")
-                        self.error_aggregator.add_warnings(current_stage, audit_result.warnings or [])
+                        for warning in audit_result.warnings or []:
+                            self.error_aggregator.add_warning(current_stage, warning)
                     else:
                         print("Audit stage encountered errors or produced partial results")
                         if audit_result.errors:
@@ -406,10 +405,11 @@ class LongtextPipeline:
     
     def _load_and_validate_config(self, config_path: Optional[str], mode: str) -> dict:
         """Load and validate configuration with environment overrides."""
-        config = load_config(config_path)
-        
-        # Apply environment variable overrides
-        config = merge_env_overrides(config)
+        config, _ = load_runtime_config(config_path, search_dir=Path.cwd())
+
+        missing_settings = get_missing_required_settings(config)
+        if missing_settings:
+            raise ValueError(format_missing_settings_message(missing_settings))
         
         # Update prompts based on mode
         if "prompts" in config and mode == "relationship":
@@ -449,150 +449,101 @@ class LongtextPipeline:
         manifest_manager.save_manifest(manifest)
         print(f"Created new manifest: {manifest.session_id}")
         return manifest
+
+    def _execute_stage_with_error_handling(
+        self,
+        stage_fn,
+        args: List,
+        stage_name: str
+    ) -> PartialResult:
+        """Normalize stage execution results into PartialResult."""
+        try:
+            result = stage_fn(*args)
+        except StageFailedError as exc:
+            errors = [str(error) for error in getattr(exc, "errors", [])] or [str(exc)]
+            return PartialResult(
+                success=False,
+                data=getattr(exc, "partial_result", None),
+                errors=errors,
+            )
+        except Exception as exc:
+            return PartialResult(success=False, data=None, errors=[str(exc)])
+
+        if isinstance(result, PartialResult):
+            return result
+
+        if result is None:
+            return PartialResult(
+                success=False,
+                data=None,
+                errors=[f"{stage_name} stage returned no usable result"],
+            )
+
+        return PartialResult(success=True, data=result, errors=[])
     
     def _run_ingest_stage(
         self, 
         input_path: str, 
         config: dict, 
         manifest: Manifest
-    ) -> Optional[List[Part]]:
-        """Run the ingest stage and return parts or None on failure."""
-        try:
-            stage = IngestStage(manifest_manager=self.manifest_manager)
-            result = stage.run(input_path, config, manifest)
-            print(f"Successfully ran ingest stage for {input_path}")
-            return result
-        except Exception as e:
-            error_msg = f"Ingest stage failed: {str(e)}"
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            
-            # Update manifest with ingest stage failure
-            try:
-                self.manifest_manager.update_stage(manifest, "ingest", "failed", error=error_msg)
-                self.manifest_manager.save_manifest(manifest)
-            except Exception as manifest_error:
-                print(f"Failed to update manifest: {manifest_error}")
-            
-            return None
+    ) -> List[Part]:
+        """Run the ingest stage and return the generated parts."""
+        stage = IngestStage(manifest_manager=self.manifest_manager)
+        result = stage.run(input_path, config, manifest)
+        print(f"Successfully ran ingest stage for {input_path}")
+        return result
     
     def _run_summarize_stage(
         self, 
         parts: List[Part], 
         config: dict, 
         manifest: Manifest,
-        input_hash: str 
-    ) -> Optional[list]:  # Returns list of Summary objects
-        """Run the summarize stage and return summaries or None on failure."""
-        try:
-            # Get LLM client
-            llm_client = get_llm_client(config.get("model", {}))
-            stage = SummarizeStage(llm_client, manifest_manager=self.manifest_manager)
-            
-            result = stage.run(parts, config, manifest, input_hash)
-            print(f"Successfully ran summarize stage for {len(parts)} parts")
-            return result
-        except Exception as e:
-            error_msg = f"Summarize stage failed: {str(e)}"
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            
-            # Update manifest with summarize stage failure
-            try:
-                self.manifest_manager.update_stage(manifest, "summarize", "failed", error=error_msg)
-                self.manifest_manager.save_manifest(manifest)
-            except Exception as manifest_error:
-                print(f"Failed to update manifest: {manifest_error}")
-            
-            return None
+        mode: str,
+    ) -> list:  # Returns list of Summary objects
+        """Run the summarize stage and return summaries."""
+        stage = SummarizeStage(manifest_manager=self.manifest_manager)
+        result = stage.run(parts, config, manifest, mode)
+        print(f"Successfully ran summarize stage for {len(parts)} parts")
+        return result
     
     def _run_stage_synthesis_stage(
         self, 
         summaries: list,  # List of Summary objects
         config: dict, 
         manifest: Manifest,
-        input_hash: str
-    ) -> Optional[list]:  # Returns list of StageSummary objects
-        """Run the stage synthesis stage and return stage summaries or None on failure."""
-        try:
-            # Get LLM client
-            llm_client = get_llm_client(config.get("model", {}))
-            stage = StageSynthesisStage(llm_client, manifest_manager=self.manifest_manager)
-            
-            result = stage.run(summaries, config, manifest, input_hash)
-            print(f"Successfully ran stage synthesis stage for {len(summaries)} summaries")
-            return result
-        except Exception as e:
-            error_msg = f"Stage synthesis stage failed: {str(e)}"
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            
-            # Update manifest with stage stage failure
-            try:
-                self.manifest_manager.update_stage(manifest, "stage", "failed", error=error_msg)
-                self.manifest_manager.save_manifest(manifest)
-            except Exception as manifest_error:
-                print(f"Failed to update manifest: {manifest_error}")
-            
-            return None
+        mode: str,
+    ) -> list:  # Returns list of StageSummary objects
+        """Run the stage synthesis stage and return stage summaries."""
+        stage = StageSynthesisStage(manifest_manager=self.manifest_manager)
+        result = stage.run(summaries, config, manifest, mode)
+        print(f"Successfully ran stage synthesis stage for {len(summaries)} summaries")
+        return result
     
     def _run_final_analysis_stage(
         self, 
         stages: list,  # List of StageSummary objects
         config: dict, 
-        manifest: Manifest
-    ) -> Optional[FinalAnalysis]:
-        """Run the final analysis stage and return final analysis or None on failure."""
-        try:
-            # Get LLM client
-            llm_client = get_llm_client(config.get("model", {}))
-            stage = FinalAnalysisStage(llm_client, manifest_manager=self.manifest_manager)
-            
-            result = stage.run(stages, config, manifest)
-            print(f"Successfully ran final analysis stage for {len(stages)} stages")
-            return result
-        except Exception as e:
-            error_msg = f"Final analysis stage failed: {str(e)}"
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            
-            # Update manifest with final stage failure
-            try:
-                self.manifest_manager.update_stage(manifest, "final", "failed", error=error_msg)
-                self.manifest_manager.save_manifest(manifest)
-            except Exception as manifest_error:
-                print(f"Failed to update manifest: {manifest_error}")
-            
-            return None
+        manifest: Manifest,
+        mode: str,
+    ) -> FinalAnalysis:
+        """Run the final analysis stage and return final analysis."""
+        stage = FinalAnalysisStage(manifest_manager=self.manifest_manager)
+        result = stage.run(stages, config, manifest, mode)
+        print(f"Successfully ran final analysis stage for {len(stages)} stages")
+        return result
     
     def _run_audit_stage(
         self, 
         final_analysis: FinalAnalysis,
         config: dict, 
-        manifest: Manifest
-    ) -> Optional[dict]:  # Returns audit results
-        """Run the audit stage, returns results or None on failure."""
-        try:
-            # Get LLM client
-            llm_client = get_llm_client(config.get("model", {}))
-            stage = AuditStage(llm_client, manifest_manager=self.manifest_manager)
-            
-            result = stage.run(final_analysis, config, manifest)
-            print("Successfully ran audit stage")
-            return result
-        except Exception as e:
-            error_msg = f"Audit stage failed: {str(e)}"
-            print(f"Error: {error_msg}")
-            traceback.print_exc()
-            
-            # Update manifest with audit stage failure
-            try:
-                self.manifest_manager.update_stage(manifest, "audit", "failed", error=error_msg)
-                self.manifest_manager.save_manifest(manifest)
-            except Exception as manifest_error:
-                print(f"Failed to update manifest: {manifest_error}")
-            
-            return None
+        manifest: Manifest,
+        mode: str,
+    ) -> dict:  # Returns audit results
+        """Run the audit stage."""
+        stage = AuditStage(manifest_manager=self.manifest_manager)
+        result = stage.run(final_analysis, config, manifest, mode)
+        print("Successfully ran audit stage")
+        return result
     
     def _load_parts_from_existing_files(self, manifest: Manifest, input_path: str) -> List[Part]:
         """Load parts from existing part files referenced in manifest."""

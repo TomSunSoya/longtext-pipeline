@@ -43,6 +43,8 @@ htmlcov/
 
 # Local data
 .longtext/
+.verify/
+.tmp/
 
 # OpenCode working directory
 .sisyphus/
@@ -54,6 +56,8 @@ output/
 .env
 .env.local
 .env.*.local
+longtext.local.yaml
+.longtext.local.yaml
 
 # Temporary test directories
 test_init_dir/

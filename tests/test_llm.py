@@ -56,6 +56,23 @@ class TestGetLLMClient:
                 base_url="https://custom.api.com",
                 timeout=60.0,
             )
+
+    def test_factory_accepts_name_key_for_model(self):
+        """Test that model configs using `name` are supported."""
+        config = {
+            "provider": "openai",
+            "name": "deepseek-chat",
+            "api_key": "test-api-key",
+        }
+
+        with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
+            try:
+                get_llm_client(config)
+            except TypeError:
+                pass
+
+            call_kwargs = mock_init.call_args.kwargs
+            assert call_kwargs["model"] == "deepseek-chat"
     
     def test_factory_uses_default_timeout_when_not_specified(self):
         """Test that default timeout is used when not specified."""
@@ -71,9 +88,9 @@ class TestGetLLMClient:
             except TypeError:
                 pass
             
-            # Should use default timeout of 30.0
+            # Should use the long-text friendly default timeout of 120.0
             call_kwargs = mock_init.call_args.kwargs
-            assert call_kwargs["timeout"] == 30.0
+            assert call_kwargs["timeout"] == 120.0
     
     def test_env_var_fallback_for_api_key(self):
         """Test that environment variable is used when api_key not in config."""
@@ -258,10 +275,37 @@ class TestGetLLMClient:
             "provider": "ollama",
             "api_key": "test-key",
         }
-        
+
         client = get_llm_client(config)
-        
+
         assert isinstance(client, OpenAICompatibleClient)
+
+
+class TestOpenAICompatibleClient:
+    """Targeted regression coverage for the raw OpenAI-compatible client."""
+
+    def test_make_request_disables_env_proxy_resolution(self):
+        """httpx should ignore ambient proxy env vars unless configured explicitly."""
+        client = OpenAICompatibleClient(
+            model="gpt-4o-mini",
+            api_key="test-key",
+            base_url="https://api.example.com/v1",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+
+        mock_httpx_client = MagicMock()
+        mock_httpx_client.post.return_value = mock_response
+
+        with patch("src.longtext_pipeline.llm.openai_compatible.httpx.Client") as mock_client_cls:
+            mock_client_cls.return_value.__enter__.return_value = mock_httpx_client
+
+            result = client._make_request({"messages": []})
+
+        assert result == {"choices": [{"message": {"content": "ok"}}]}
+        mock_client_cls.assert_called_once_with(timeout=client.timeout, trust_env=False)
     
     def test_vllm_provider_creates_client(self):
         """Test that 'vllm' provider creates OpenAICompatibleClient."""
@@ -315,7 +359,7 @@ class TestGetLLMClient:
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["api_key"] == "env-key"
                 assert call_kwargs["model"] == "gpt-4o-mini"
-                assert call_kwargs["timeout"] == 30.0
+                assert call_kwargs["timeout"] == 120.0
     
     def test_client_can_be_used_for_completion(self):
         """Test that created client has required methods (integration test)."""

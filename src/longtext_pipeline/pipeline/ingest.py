@@ -81,9 +81,16 @@ class IngestStage:
         print(f"Estimated token count for input: {estimated_token_count:,}")
         
         # 3. Split into parts (using splitter.split_text)
-        # Configuration for splitting
-        chunk_size = config.get('chunk_size', 1000)
-        overlap_size = config.get('overlap', 100)
+        # Accept either full pipeline config or a flat ingest config.
+        ingest_config = config.get('stages', {}).get('ingest', config)
+        chunk_size = ingest_config.get('chunk_size', 1000)
+        overlap_size = ingest_config.get('overlap')
+        if overlap_size is None:
+            overlap_rate = ingest_config.get('overlap_rate')
+            if overlap_rate is not None:
+                overlap_size = int(chunk_size * overlap_rate)
+            else:
+                overlap_size = 100
         
         # Get parts from the splitter
         try:

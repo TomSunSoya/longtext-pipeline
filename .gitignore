@@ -64,6 +64,15 @@ test_init_dir/
 another_test_dir/
 temp_combined.txt
 
+# Local scratch / QA artifacts
+.claude/
+bench_f3_performance.py
+temp_append.txt
+tmp_test_backup.txt
+test_input_long.txt
+test_multi_agent_verification.py
+tests/test_f3_output.txt
+
 # macOS
 .DS_Store
 

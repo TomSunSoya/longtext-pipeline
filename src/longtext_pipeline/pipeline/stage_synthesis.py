@@ -20,6 +20,7 @@ from ..llm.factory import get_llm_client
 from ..manifest import ManifestManager
 from ..models import Manifest, StageSummary, Summary
 from ..utils.io import read_file, write_file
+from ..utils.token_estimator import estimate_tokens
 
 
 class StageSynthesisStage:
@@ -117,7 +118,7 @@ class StageSynthesisStage:
                 "summary_count": len(group),
                 "summary_indices": [s.part_index for s in group],
                 "model": model,
-                "estimated_tokens": len(response.split()) // 1.3  # Rough estimate
+                "estimated_tokens": estimate_tokens(response)
             }
         )
         

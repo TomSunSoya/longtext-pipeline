@@ -1,5 +1,6 @@
 """Tests for current multi-perspective final analysis behavior."""
 
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, call, patch
 
@@ -7,6 +8,7 @@ import pytest
 
 from src.longtext_pipeline.models import FinalAnalysis, Manifest, StageInfo, StageSummary, Summary
 from src.longtext_pipeline.pipeline.final_analysis import FinalAnalysisStage
+from src.longtext_pipeline.utils.token_estimator import estimate_tokens
 
 
 class DummyClient:
@@ -323,6 +325,124 @@ async def test_multi_perspective_threshold_scales_with_agent_count(tmp_path):
 
     mock_fallback.assert_awaited_once()
     assert result.final_result == "single-pass fallback"
+
+
+@pytest.mark.asyncio
+async def test_generate_specialist_analysis_requests_structured_output():
+    """Specialist prompts should enforce a stable Markdown structure."""
+    stage = FinalAnalysisStage()
+    client = AsyncMock()
+    client.acomplete = AsyncMock(return_value="structured response")
+
+    result = await stage._generate_specialist_analysis(
+        analyst_type="topic_analyst",
+        stage_summaries=make_stage_summaries(),
+        prompt_template="Base prompt",
+        client=client,
+        model="topic-model",
+    )
+
+    prompt = client.acomplete.await_args.args[0]
+    assert "## Executive Summary" in prompt
+    assert "## Key Findings" in prompt
+    assert "## Cross-Stage Evidence" in prompt
+    assert "## Risks And Unknowns" in prompt
+    assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_meta_agent_prompt_mentions_missing_perspectives():
+    """Meta-agent aggregation should acknowledge failed perspectives explicitly."""
+    stage = FinalAnalysisStage()
+    client = AsyncMock()
+    client.acomplete = AsyncMock(return_value="Integrated analysis")
+
+    await stage._aggregate_with_meta_agent(
+        specialist_results=[
+            {
+                "analyst_type": "topic_analyst",
+                "status": "completed",
+                "analysis": "topic analysis",
+            },
+            {
+                "analyst_type": "timeline_analyst",
+                "status": "failed",
+                "analysis": "[Error: timeout]",
+                "error": "timeout",
+            },
+        ],
+        client=client,
+        model="meta-model",
+    )
+
+    prompt = client.acomplete.await_args.args[0]
+    assert "Topic Analyst Perspective" in prompt
+    assert "Timeline Analyst" in prompt
+    assert "missing evidence" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_multi_perspective_limits_specialist_concurrency_with_semaphore(tmp_path):
+    """max_workers should cap concurrent specialist execution."""
+    stage = FinalAnalysisStage()
+    stage_summaries = make_stage_summaries()
+    manifest = make_manifest(tmp_path)
+    config = make_config()
+    config["pipeline"] = {"max_workers": 2}
+
+    current_concurrency = 0
+    peak_concurrency = 0
+
+    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+        nonlocal current_concurrency, peak_concurrency
+        current_concurrency += 1
+        peak_concurrency = max(peak_concurrency, current_concurrency)
+        await asyncio.sleep(0.01)
+        current_concurrency -= 1
+        return {
+            "analyst_type": analyst_type,
+            "model_used": model,
+            "analysis": f"{analyst_type} analysis",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "status": "completed",
+        }
+
+    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=DummyClient("meta-model")), \
+         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
+         patch.object(stage, "_aggregate_with_meta_agent", AsyncMock(return_value="Integrated analysis")):
+        result = await stage._run_multi_perspective(
+            stage_summaries=stage_summaries,
+            config=config,
+            manifest=manifest,
+            mode="general",
+        )
+
+    assert peak_concurrency <= 2
+    assert result.metadata["specialist_max_concurrency"] == 2
+
+
+@pytest.mark.asyncio
+async def test_single_pass_uses_token_estimator_for_non_whitespace_output(tmp_path):
+    """Token metadata should use the shared estimator instead of whitespace splitting."""
+    stage = FinalAnalysisStage()
+    stage_summaries = make_stage_summaries()
+    manifest = make_manifest(tmp_path)
+    config = make_config()
+    response = "这是中文输出"
+
+    client = DummyClient("meta-model")
+    client.acomplete = AsyncMock(return_value=response)
+
+    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=client):
+        result = await stage._run_single_pass(
+            stage_summaries=stage_summaries,
+            config=config,
+            manifest=manifest,
+            mode="general",
+        )
+
+    assert result.metadata["estimated_tokens"] == estimate_tokens(response)
+    assert result.metadata["estimated_tokens"] > 0
 
 
 def test_multi_agent_stage_exposes_current_private_api_only():

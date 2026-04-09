@@ -16,6 +16,7 @@ from ..llm.factory import get_llm_client
 from ..manifest import ManifestManager
 from ..models import Manifest, Part, Summary
 from ..utils.io import read_file, write_file
+from ..utils.token_estimator import estimate_tokens
 
 
 class SummarizeStage:
@@ -104,7 +105,7 @@ class SummarizeStage:
                 "generated_at": timestamp.isoformat(),
                 "part_file": part_path,
                 "model": model,
-                "estimated_tokens": len(response.split()) // 1.3  # Rough estimate
+                "estimated_tokens": estimate_tokens(response)
             }
         )
         

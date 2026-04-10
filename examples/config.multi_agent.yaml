@@ -13,6 +13,9 @@
 #   LONGTEXT_MODEL_NAME  - Override default model name
 #   LONGTEXT_OUTPUT_DIR  - Override default output directory
 #   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+#   LONGTEXT_LOG_LEVEL   - Override log level
+#   LONGTEXT_LOG_FORMAT  - Override log format ("text" or "json")
+#   LONGTEXT_LOG_FILE    - Write logs to a file
 
 # =============================================================================
 # MODEL CONFIGURATION (default/fallback)
@@ -87,6 +90,14 @@ pipeline:
   allow_resume: true
   audit_enabled: false
   max_workers: 4
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  level: "INFO"
+  format: "text"
+  file: null
 
 # =============================================================================
 # AGENTS CONFIGURATION (NEW)

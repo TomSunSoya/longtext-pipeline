@@ -6,6 +6,7 @@ All tests use mocked LLM responses to avoid requiring real API keys.
 """
 
 import json
+import logging
 import os
 import pytest
 import tempfile
@@ -482,7 +483,7 @@ class TestManifestManagement:
 class TestResumeFunctionality:
     """Verify resume works correctly after partial completion."""
     
-    def test_resume_skips_completed_stages(self, smoke_input_file, mock_llm_responses, temp_dir):
+    def test_resume_skips_completed_stages(self, smoke_input_file, mock_llm_responses, temp_dir, caplog):
         """Test that resume skips stages that are already completed."""
         # First run - complete pipeline
         mock_client1 = create_mock_llm_client(mock_llm_responses)
@@ -506,31 +507,27 @@ class TestResumeFunctionality:
         mock_client2 = create_mock_llm_client(mock_llm_responses)
         
         with patch_pipeline_llm_client(mock_client2):
-            
-            with patch('builtins.print') as mock_print:
+            with caplog.at_level(logging.INFO):
                 pipeline.run(
                     input_path=smoke_input_file,
                     config_path=None,
                     mode="general",
                     resume=True
                 )
-                
-                # Verify resume-related messages were printed
-                print_calls = [str(c) for c in mock_print.call_args_list]
-                resume_keywords = ['resume', 'skip', 'completed', 'existing']
-                resume_messages = [
-                    c for c in print_calls 
-                    if any(kw in c.lower() for kw in resume_keywords)
-                ]
-                # Should have some resume-related output
-                assert len(resume_messages) > 0
+
+            resume_keywords = ['resume', 'skip', 'completed', 'existing']
+            resume_messages = [
+                message for message in caplog.messages
+                if any(keyword in message.lower() for keyword in resume_keywords)
+            ]
+            assert len(resume_messages) > 0
         
         # Verify same session ID persisted
         manifest2 = manifest_manager.load_manifest(smoke_input_file)
         assert manifest2.session_id == first_session_id
     
     def test_resume_input_changed_creates_fresh_manifest(
-        self, smoke_input_file, mock_llm_responses, temp_dir
+        self, smoke_input_file, mock_llm_responses, temp_dir, caplog
     ):
         """Test that resume creates fresh manifest when input file changes."""
         # First run
@@ -559,23 +556,20 @@ class TestResumeFunctionality:
         mock_client2 = create_mock_llm_client(mock_llm_responses)
         
         with patch_pipeline_llm_client(mock_client2):
-            
-            with patch('builtins.print') as mock_print:
+            with caplog.at_level(logging.INFO):
                 pipeline.run(
                     input_path=smoke_input_file,
                     config_path=None,
                     mode="general",
                     resume=True
                 )
-                
-                # Verify change detection messages
-                print_calls = [str(c) for c in mock_print.call_args_list]
-                change_keywords = ['changed', 'different', 'new', 'fresh', 'restart']
-                change_messages = [
-                    c for c in print_calls 
-                    if any(kw in c.lower() for kw in change_keywords)
-                ]
-                assert len(change_messages) > 0
+
+            change_keywords = ['changed', 'different', 'new', 'fresh', 'restart']
+            change_messages = [
+                message for message in caplog.messages
+                if any(keyword in message.lower() for keyword in change_keywords)
+            ]
+            assert len(change_messages) > 0
         
         # Verify new session was created
         manifest2 = manifest_manager.load_manifest(smoke_input_file)

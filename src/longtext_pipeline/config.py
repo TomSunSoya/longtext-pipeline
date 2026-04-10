@@ -77,6 +77,11 @@ DEFAULT_CONFIG = {
         "max_workers": 4,
         "specialist_count": 4,
     },
+    "logging": {
+        "level": "INFO",
+        "format": "text",
+        "file": None,
+    },
     "agents": {
         "summarizer": {
             "model": None,  # None means use top-level model config
@@ -235,6 +240,7 @@ def validate_config(config: dict) -> bool:
         "output",
         "input",
         "pipeline",
+        "logging",
         "agents",
     }
 
@@ -250,6 +256,7 @@ def validate_config(config: dict) -> bool:
     known_naming_keys = {"summarize_prefix", "stage_prefix", "final_filename"}
     known_input_keys = {"file_path", "encoding"}
     known_pipeline_keys = {"allow_resume", "audit_enabled", "max_workers", "specialist_count"}
+    known_logging_keys = {"level", "format", "file"}
 
     # Check top-level keys
     for key in config:
@@ -331,6 +338,12 @@ def validate_config(config: dict) -> bool:
         for key in config["pipeline"]:
             if key not in known_pipeline_keys:
                 warnings.warn(f"Unknown configuration key in pipeline: '{key}'")
+
+    # Validate logging section
+    if "logging" in config:
+        for key in config["logging"]:
+            if key not in known_logging_keys:
+                warnings.warn(f"Unknown configuration key in logging: '{key}'")
 
     # Validate agents section
     if "agents" in config:
@@ -460,6 +473,9 @@ def merge_env_overrides(config: dict) -> dict:
     - LONGTEXT_MODEL_NAME: Default model name override
     - LONGTEXT_OUTPUT_DIR: Default output directory override
     - LONGTEXT_PROMPTS_DIR: Default prompts directory override
+    - LONGTEXT_LOG_LEVEL: Logging level override
+    - LONGTEXT_LOG_FORMAT: Logging format override ('text' or 'json')
+    - LONGTEXT_LOG_FILE: Log file path override
 
     Also performs ${VAR_NAME} and ${VAR_NAME:-default} substitution in string values.
 
@@ -515,6 +531,22 @@ def merge_env_overrides(config: dict) -> dict:
         if "prompts" not in result:
             result["prompts"] = {}
         result["prompts"]["dir"] = prompts_dir_override
+
+    # Logging overrides
+    if "logging" not in result:
+        result["logging"] = {}
+
+    log_level_override = os.environ.get("LONGTEXT_LOG_LEVEL")
+    if log_level_override:
+        result["logging"]["level"] = log_level_override
+
+    log_format_override = os.environ.get("LONGTEXT_LOG_FORMAT")
+    if log_format_override:
+        result["logging"]["format"] = log_format_override
+
+    log_file_override = os.environ.get("LONGTEXT_LOG_FILE")
+    if log_file_override:
+        result["logging"]["file"] = log_file_override
 
     # Apply env var substitution to all string values
     result = _substitute_env_vars_recursive(result)

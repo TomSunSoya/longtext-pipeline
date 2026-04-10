@@ -13,6 +13,9 @@
 #   LONGTEXT_MODEL_NAME  - Override default model name
 #   LONGTEXT_OUTPUT_DIR  - Override default output directory
 #   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+#   LONGTEXT_LOG_LEVEL   - Override log level (DEBUG, INFO, WARNING, ERROR)
+#   LONGTEXT_LOG_FORMAT  - Override log format ("text" or "json")
+#   LONGTEXT_LOG_FILE    - Write logs to a file in addition to stderr
 
 # =============================================================================
 # MODEL CONFIGURATION
@@ -200,3 +203,24 @@ pipeline:
   #   - 4: Balanced (recommended for most systems)
   #   - 8+: Aggressive, may hit API rate limits
   max_workers: 4
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+# Controls runtime logging verbosity, output format, and optional file sink.
+logging:
+  # Log level threshold.
+  #   - DEBUG: Verbose diagnostic output
+  #   - INFO: Normal operational visibility (recommended)
+  #   - WARNING: Problems only
+  #   - ERROR: Failures only
+  level: "INFO"
+
+  # Log encoding format.
+  #   - text: Human-readable logs
+  #   - json: Structured logs for ingestion by log systems
+  format: "text"
+
+  # Optional log file path. Set to null to disable file logging.
+  # Example: "./logs/longtext.log"
+  file: null

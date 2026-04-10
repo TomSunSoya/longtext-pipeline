@@ -10,6 +10,7 @@ maximize throughput despite individual group failures.
 """
 
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -21,6 +22,9 @@ from ..manifest import ManifestManager
 from ..models import Manifest, StageSummary, Summary
 from ..utils.io import read_file, write_file
 from ..utils.token_estimator import estimate_tokens
+
+
+logger = logging.getLogger(__name__)
 
 
 class StageSynthesisStage:
@@ -191,14 +195,14 @@ _Stage synthesized by {model} ({timestamp})_
             )
 
         if mode == "relationship":
-            print("[StageSynthesisStage] EXPERIMENTAL MODE: Relationship-focused analysis enabled")
+            logger.warning("Relationship-focused stage synthesis mode is experimental")
 
         self.manifest_manager.update_stage(manifest, 'stage', 'running')
 
         prompt_template = self._load_prompt_template(mode)
 
         group_size = config.get('stages', {}).get('stage', {}).get('group_size', 5)
-        print(f"[StageSynthesisStage] Using group_size: {group_size}")
+        logger.info("Stage synthesis using group_size=%s", group_size)
 
         # Create LLM client using agent-specific model config for stage_synthesizer
         client = get_llm_client(config, agent_type='stage_synthesizer')
@@ -214,11 +218,15 @@ _Stage synthesized by {model} ({timestamp})_
         
         # Group summaries into stages
         groups = grouper.group_summaries(summaries)
-        print(f"[StageSynthesisStage] Groups created: {len(groups)} (from {len(summaries)} summaries)")
+        logger.info(
+            "Stage synthesis created %s groups from %s summaries",
+            len(groups),
+            len(summaries),
+        )
         
         # Handle empty summaries list - nothing to synthesize
         if not groups:
-            print("[StageSynthesisStage] No summaries to synthesize")
+            logger.info("No summaries to synthesize")
             stats = {
                 "stages_completed": 0,
                 "stages_total": 0,
@@ -300,7 +308,12 @@ _Stage synthesized by {model} ({timestamp})_
         elif failed > 0:
             # Partial success
             stage_status = "successful"  # Stage succeeded overall with partials
-            print(f"[StageSynthesisStage] Partial success: {successful}/{total_groups} successful, {failed} failed")
+            logger.warning(
+                "Stage synthesis partial success: %s/%s successful, %s failed",
+                successful,
+                total_groups,
+                failed,
+            )
             self.manifest_manager.update_stage(
                 manifest,
                 'stage',
@@ -337,7 +350,11 @@ _Stage synthesized by {model} ({timestamp})_
         async def process_group(group_index: int, group: List[Summary]):
             async with semaphore:
                 try:
-                    print(f"[StageSynthesisStage] Processing group {group_index} ({len(group)} summaries)...")
+                    logger.debug(
+                        "Processing group %s containing %s summaries",
+                        group_index,
+                        len(group),
+                    )
                     stage_summary = await self._synthesize_group(
                         group=group,
                         group_index=group_index,
@@ -347,7 +364,7 @@ _Stage synthesized by {model} ({timestamp})_
                     )
                     stage_summary.metadata['mode'] = mode
                     stage_path = self._save_stage_summary(stage_summary, output_dir)
-                    print(f"[StageSynthesisStage] Completed group {group_index}: {stage_path}")
+                    logger.info("Completed group %s: %s", group_index, stage_path)
                     return stage_summary, stage_path, None
                 except LLMError as e:
                     error_info = {
@@ -355,7 +372,7 @@ _Stage synthesized by {model} ({timestamp})_
                         "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
                         "error": str(e)
                     }
-                    print(f"[StageSynthesisStage] Failed group {group_index}: {e}")
+                    logger.warning("Failed group %s: %s", group_index, e)
                     return None, "", error_info
                 except Exception as e:
                     error_info = {
@@ -363,7 +380,7 @@ _Stage synthesized by {model} ({timestamp})_
                         "summary_files": [f"summary_{s.part_index:02d}.md" for s in group],
                         "error": f"Unexpected error: {str(e)}"
                     }
-                    print(f"[StageSynthesisStage] Unexpected error on group {group_index}: {e}")
+                    logger.exception("Unexpected error on group %s", group_index)
                     return None, "", error_info
 
         return process_group

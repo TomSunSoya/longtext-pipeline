@@ -5,7 +5,7 @@ command-line interface with proper help texts and command routing.
 """
 
 import os
-import sys
+import logging
 from pathlib import Path
 
 import typer
@@ -20,7 +20,8 @@ from longtext_pipeline.config import (
     get_missing_required_settings,
     load_runtime_config,
 )
-from longtext_pipeline.utils.io import ensure_dir, write_file
+from longtext_pipeline.logging_utils import configure_logging
+from longtext_pipeline.utils.io import write_file
 from longtext_pipeline.pipeline.orchestrator import LongtextPipeline
 from longtext_pipeline.manifest import ManifestManager
 from longtext_pipeline.renderer import format_status
@@ -31,6 +32,8 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def version_callback(value: bool) -> None:
@@ -135,6 +138,7 @@ def run(
         
         # Step 2: Load config from explicit config + auto-discovered local config + env overrides
         final_config, loaded_sources = load_runtime_config(config, search_dir=Path.cwd())
+        configure_logging(final_config)
 
         missing_settings = get_missing_required_settings(final_config)
         if missing_settings:
@@ -157,20 +161,20 @@ def run(
         # Step 3: Initialize LongtextPipeline from orchestrator
         pipeline = LongtextPipeline()
         
-            # Step 4: Execute pipeline with appropriate parameters
-        print(f"Starting pipeline for: {input_path}")
-        print(f"Mode: {mode}")
-        print(f"Resume: {resume}")
-        print(f"Multi-perspective: {effective_multi_perspective}")
+        # Step 4: Execute pipeline with appropriate parameters
+        typer.echo(f"Starting pipeline for: {input_path}")
+        typer.echo(f"Mode: {mode}")
+        typer.echo(f"Resume: {resume}")
+        typer.echo(f"Multi-perspective: {effective_multi_perspective}")
         if max_workers is not None:
-            print(f"Max workers: {max_workers}")
+            typer.echo(f"Max workers: {max_workers}")
         if agent_count is not None:
-            print(f"Specialist agent count: {agent_count}")
+            typer.echo(f"Specialist agent count: {agent_count}")
         if loaded_sources:
-            print(f"Config sources: {', '.join(loaded_sources)}")
+            typer.echo(f"Config sources: {', '.join(loaded_sources)}")
         else:
-            print("Config sources: built-in defaults")
-        print()
+            typer.echo("Config sources: built-in defaults")
+        typer.echo()
         
         # Step 5: Run pipeline with error handling
         try:
@@ -188,20 +192,22 @@ def run(
             status = final_analysis.status if hasattr(final_analysis, 'status') else "unknown"
             
             if status == "completed":
-                print("\n[PASS] Pipeline completed successfully")
+                typer.echo("\n[PASS] Pipeline completed successfully")
                 return 0
             elif status in ("partial_success", "completed_with_issues"):
-                print("\n[PARTIAL] Pipeline completed with partial results or issues")
+                typer.echo("\n[PARTIAL] Pipeline completed with partial results or issues")
                 return 2
             else:
-                print(f"\n[FAIL] Pipeline failed with status: {status}")
+                typer.echo(f"\n[FAIL] Pipeline failed with status: {status}")
                 return 1
                 
         except KeyboardInterrupt:
-            print("\nPipeline interrupted by user")
+            logger.warning("Pipeline interrupted by user")
+            typer.echo("\nPipeline interrupted by user")
             return 1
         except Exception as e:
-            print(f"\n[FAIL] Pipeline execution failed: {e}")
+            logger.exception("Pipeline execution failed")
+            typer.echo(f"\n[FAIL] Pipeline execution failed: {e}")
             return 1
             
     except FileNotFoundError as e:
@@ -217,6 +223,7 @@ def run(
         typer.echo(f"Error: {e}", err=True)
         return 1
     except Exception as e:
+        logger.exception("Unexpected CLI error")
         typer.echo(f"Unexpected error: {e}", err=True)
         return 1
 
@@ -358,7 +365,7 @@ def init(
         if not target_path.exists():
             try:
                 target_path.mkdir(parents=True, exist_ok=True)
-                print(f"Created directory: {target_path}")
+                typer.echo(f"Created directory: {target_path}")
             except PermissionError:
                 typer.echo(f"Error: No permission to create directory: {target_path}", err=True)
                 return 1
@@ -394,12 +401,12 @@ def init(
                 )
                 
                 if not should_overwrite:
-                    print(f"Skipping {filename}...")
+                    typer.echo(f"Skipping {filename}...")
                     continue
             
             try:
                 write_file(filepath, content)
-                print(f"Created {filepath}")
+                typer.echo(f"Created {filepath}")
             except PermissionError:
                 typer.echo(f"Error: No permission to write file: {filepath}", err=True)
                 return 1
@@ -407,17 +414,18 @@ def init(
                 typer.echo(f"Error: Failed to write {filepath}: {e}", err=True)
                 return 1
         
-        print(f"\nInitialization complete! Configuration files created in: {target_path}")
-        print("\nTo get started:")
-        print("- Review config.general.yaml for general analysis settings")
-        print("- Review config.relationship.yaml for relationship-focused analysis")
-        print(f"- Put your local API/model settings in {AUTO_CONFIG_FILENAMES[0]} (auto-loaded on startup)")
-        print("- Create your own input text file (.txt or .md)")
-        print("- Run with: longtext run your_input.txt --config config.general.yaml")
+        typer.echo(f"\nInitialization complete! Configuration files created in: {target_path}")
+        typer.echo("\nTo get started:")
+        typer.echo("- Review config.general.yaml for general analysis settings")
+        typer.echo("- Review config.relationship.yaml for relationship-focused analysis")
+        typer.echo(f"- Put your local API/model settings in {AUTO_CONFIG_FILENAMES[0]} (auto-loaded on startup)")
+        typer.echo("- Create your own input text file (.txt or .md)")
+        typer.echo("- Run with: longtext run your_input.txt --config config.general.yaml")
         
         return 0
         
     except Exception as e:
+        logger.exception("Unexpected error during initialization")
         typer.echo(f"Unexpected error during initialization: {e}", err=True)
         return 1
 

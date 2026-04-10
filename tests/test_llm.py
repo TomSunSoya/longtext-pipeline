@@ -23,6 +23,7 @@ def make_llm_config(
     api_key: str | None = None,
     base_url: str | None = None,
     timeout: float | None = None,
+    temperature: float | None = None,
 ) -> dict:
     """Build config objects using the current nested model schema."""
     model = {"provider": provider}
@@ -34,6 +35,8 @@ def make_llm_config(
         model["base_url"] = base_url
     if timeout is not None:
         model["timeout"] = timeout
+    if temperature is not None:
+        model["temperature"] = temperature
     return {"model": model}
 
 
@@ -55,6 +58,7 @@ class TestGetLLMClient:
             api_key="test-api-key",
             base_url="https://custom.api.com",
             timeout=60.0,
+            temperature=0.2,
         )
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
@@ -69,6 +73,7 @@ class TestGetLLMClient:
                 api_key="test-api-key",
                 base_url="https://custom.api.com",
                 timeout=60.0,
+                temperature=0.2,
             )
 
     def test_factory_accepts_name_key_for_model(self):
@@ -83,6 +88,7 @@ class TestGetLLMClient:
 
             call_kwargs = mock_init.call_args.kwargs
             assert call_kwargs["model"] == "deepseek-chat"
+            assert call_kwargs["temperature"] == 0.7
     
     def test_factory_uses_default_timeout_when_not_specified(self):
         """Test that default timeout is used when not specified."""
@@ -97,6 +103,7 @@ class TestGetLLMClient:
             # Should use the long-text friendly default timeout of 120.0
             call_kwargs = mock_init.call_args.kwargs
             assert call_kwargs["timeout"] == 120.0
+            assert call_kwargs["temperature"] == 0.7
     
     def test_env_var_fallback_for_api_key(self):
         """Test that environment variable is used when api_key not in config."""
@@ -111,6 +118,7 @@ class TestGetLLMClient:
                 
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["api_key"] == "env-api-key"
+                assert call_kwargs["temperature"] == 0.7
     
     def test_env_var_fallback_for_base_url(self):
         """Test that environment variable is used when base_url not in config."""
@@ -125,6 +133,7 @@ class TestGetLLMClient:
                 
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["base_url"] == "https://env.api.com"
+                assert call_kwargs["temperature"] == 0.7
     
     def test_env_var_fallback_for_model_name(self):
         """Test that LONGTEXT_MODEL_NAME env var is used when model not in config."""
@@ -139,6 +148,7 @@ class TestGetLLMClient:
                 
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["model"] == "env-model"
+                assert call_kwargs["temperature"] == 0.7
     
     def test_explicit_args_override_config(self):
         """Test that explicit function arguments override config values."""
@@ -147,6 +157,7 @@ class TestGetLLMClient:
             api_key="config-key",
             base_url="https://config.api.com",
             timeout=30.0,
+            temperature=0.25,
         )
         
         with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
@@ -157,6 +168,7 @@ class TestGetLLMClient:
                     api_key="override-key",
                     base_url="https://override.api.com",
                     timeout=120.0,
+                    temperature=0.9,
                 )
             except TypeError:
                 pass
@@ -166,6 +178,7 @@ class TestGetLLMClient:
                 api_key="override-key",
                 base_url="https://override.api.com",
                 timeout=120.0,
+                temperature=0.9,
             )
     
     def test_explicit_args_override_env_vars(self):
@@ -190,6 +203,7 @@ class TestGetLLMClient:
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["api_key"] == "override-key"
                 assert call_kwargs["model"] == "override-model"
+                assert call_kwargs["temperature"] == 0.7
     
     def test_config_values_override_env_vars(self):
         """Test that config values override environment variables."""
@@ -208,6 +222,7 @@ class TestGetLLMClient:
                 call_kwargs = mock_init.call_args.kwargs
                 assert call_kwargs["api_key"] == "config-key"
                 assert call_kwargs["model"] == "config-model"
+                assert call_kwargs["temperature"] == 0.7
     
     def test_invalid_config_type_raises_type_error(self):
         """Test that non-dict config raises TypeError."""
@@ -282,6 +297,43 @@ class TestOpenAICompatibleClient:
 
         assert result == {"choices": [{"message": {"content": "ok"}}]}
         mock_client_cls.assert_called_once_with(timeout=client.timeout, trust_env=False)
+
+    def test_factory_passes_temperature_to_client(self):
+        """Configured model temperature should be passed into the client."""
+        config = make_llm_config(api_key="test-key", temperature=0.15)
+
+        with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
+            try:
+                get_llm_client(config)
+            except TypeError:
+                pass
+
+            assert mock_init.call_args.kwargs["temperature"] == 0.15
+
+    def test_factory_preserves_zero_temperature(self):
+        """A temperature of 0.0 should not be overwritten by defaults."""
+        config = make_llm_config(api_key="test-key", temperature=0.0)
+
+        with patch.object(OpenAICompatibleClient, '__init__', return_value=None) as mock_init:
+            try:
+                get_llm_client(config)
+            except TypeError:
+                pass
+
+            assert mock_init.call_args.kwargs["temperature"] == 0.0
+
+    def test_build_payload_uses_client_temperature(self):
+        """Request payload should honor the client instance temperature."""
+        client = OpenAICompatibleClient(
+            model="gpt-4o-mini",
+            api_key="test-key",
+            base_url="https://api.example.com/v1",
+            temperature=0.15,
+        )
+
+        payload = client._build_payload("Hello")
+
+        assert payload["temperature"] == 0.15
     
     def test_vllm_provider_creates_client(self):
         """Test that 'vllm' provider creates OpenAICompatibleClient."""
@@ -312,6 +364,7 @@ class TestOpenAICompatibleClient:
             # Should default to gpt-4o-mini when no model specified
             call_kwargs = mock_init.call_args.kwargs
             assert call_kwargs["model"] == "gpt-4o-mini"
+            assert call_kwargs["temperature"] == 0.7
     
     def test_empty_config_uses_defaults_and_env(self):
         """Test that empty config uses defaults and environment variables."""
@@ -328,6 +381,7 @@ class TestOpenAICompatibleClient:
                 assert call_kwargs["api_key"] == "env-key"
                 assert call_kwargs["model"] == "gpt-4o-mini"
                 assert call_kwargs["timeout"] == 120.0
+                assert call_kwargs["temperature"] == 0.7
     
     def test_client_can_be_used_for_completion(self):
         """Test that created client has required methods (integration test)."""

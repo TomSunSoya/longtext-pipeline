@@ -54,6 +54,7 @@ class OpenAICompatibleClient(LLMClient):
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT,
+        temperature: float = 0.7,
     ):
         """Initialize the OpenAI-compatible client.
         
@@ -62,6 +63,7 @@ class OpenAICompatibleClient(LLMClient):
             base_url: Base URL for the API (default: from OPENAI_BASE_URL or OpenAI default)
             api_key: API key for authentication (default: from OPENAI_API_KEY)
             timeout: Request timeout in seconds (default: 30.0)
+            temperature: Sampling temperature for completions (default: 0.7)
             
         Raises:
             LLMAuthenticationError: If no API key is provided
@@ -70,6 +72,7 @@ class OpenAICompatibleClient(LLMClient):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL") or self.DEFAULT_BASE_URL
         self.timeout = timeout
+        self.temperature = temperature
         
         if not self.api_key:
             raise LLMAuthenticationError(
@@ -121,7 +124,7 @@ class OpenAICompatibleClient(LLMClient):
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": self.temperature,
         }
         
         # Request JSON format if needed

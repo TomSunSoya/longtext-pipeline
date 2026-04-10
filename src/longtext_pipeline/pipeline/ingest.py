@@ -7,6 +7,7 @@ processing. Implements the input processing pipeline for MVP.
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -17,6 +18,9 @@ from ..splitter import TextSplitter
 from ..utils.io import read_file
 from ..utils.text_clean import clean_text
 from ..utils.token_estimator import estimate_tokens
+
+
+logger = logging.getLogger(__name__)
 
 
 class IngestStage:
@@ -78,7 +82,7 @@ class IngestStage:
         
         # Get token count estimate and log for awareness
         estimated_token_count = estimate_tokens(cleaned_content)
-        print(f"Estimated token count for input: {estimated_token_count:,}")
+        logger.info("Estimated token count for input: %s", f"{estimated_token_count:,}")
         
         # 3. Split into parts (using splitter.split_text)
         # Accept either full pipeline config or a flat ingest config.
@@ -110,7 +114,10 @@ class IngestStage:
                 # Add metadata to mark this part as needing special handling
                 parts[0].metadata['skip_summary'] = True
                 parts[0].metadata['reason'] = 'Tiny input - skip summarization'
-                print(f"Tiny input detected (<100 tokens), marking for skip_summary: {estimated_token_count} tokens")
+                logger.info(
+                    "Tiny input detected (<100 tokens); marking for skip_summary: %s tokens",
+                    estimated_token_count,
+                )
 
         # 4. Save parts to .longtext/part_*.txt
         parts_dir = Path(input_path).parent / ".longtext"

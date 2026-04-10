@@ -21,6 +21,7 @@ def make_llm_config(
     api_key: str | None = "test-key",
     base_url: str | None = None,
     timeout: float | None = None,
+    temperature: float | None = None,
 ) -> dict:
     """Build config objects using the current nested model schema."""
     model = {"provider": provider}
@@ -32,6 +33,8 @@ def make_llm_config(
         model["base_url"] = base_url
     if timeout is not None:
         model["timeout"] = timeout
+    if temperature is not None:
+        model["temperature"] = temperature
     return {"model": model}
 
 
@@ -77,6 +80,22 @@ class TestAsyncComplete:
             assert "You are a helpful assistant." in messages[0]["content"]
             assert messages[1]["role"] == "user"
             assert messages[1]["content"] == "Test prompt"
+
+    @pytest.mark.asyncio
+    async def test_acomplete_honors_configured_temperature(self):
+        """Async request payload should preserve the configured temperature."""
+        config = make_llm_config(temperature=0.0)
+        client = get_llm_client(config)
+
+        mock_response = {
+            "choices": [{"message": {"content": "Deterministic response"}}]
+        }
+
+        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+            await client.acomplete("Test prompt")
+
+        payload = mock_request.call_args[0][0]
+        assert payload["temperature"] == 0.0
 
     @pytest.mark.asyncio
     async def test_acomplete_empty_content_raises_error(self):

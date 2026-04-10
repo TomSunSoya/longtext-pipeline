@@ -2,6 +2,11 @@
 #
 # This configuration is optimized for testing async/parallel performance
 # without requiring real API calls.
+#
+# Environment variable overrides available:
+#   LONGTEXT_LOG_LEVEL   - Override log level
+#   LONGTEXT_LOG_FORMAT  - Override log format ("text" or "json")
+#   LONGTEXT_LOG_FILE    - Write logs to a file
 
 # =============================================================================
 # MODEL CONFIGURATION - Using local mock for testing
@@ -69,6 +74,14 @@ pipeline:
   allow_resume: false  # Disable for clean performance tests
   audit_enabled: false
   max_workers: 4  # Critical: controls parallelism level
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  level: "INFO"
+  format: "text"
+  file: null
 
 # =============================================================================
 # AGENTS CONFIGURATION

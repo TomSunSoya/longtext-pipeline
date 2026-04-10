@@ -10,10 +10,14 @@ and this placeholder simply issues a warning and returns a placeholder
 result to maintain the 5-stage pipeline pattern.
 """
 
+import logging
 from typing import Any, Dict
 
 from ..models import Manifest
 from ..manifest import ManifestManager
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuditStage:
@@ -63,9 +67,9 @@ class AuditStage:
             Full audit functionality is deferred to v2.
         """
         # Issue warning that audit is experimental
-        print("[AuditStage] WARNING: Audit functionality is experimental in MVP")
-        print("[AuditStage] Skipping audit - full implementation deferred to v2")
-        print("[AuditStage] Analysis quality checks: NOT PERFORMED")
+        logger.warning("Audit functionality is experimental in MVP")
+        logger.warning("Skipping audit; full implementation is deferred to v2")
+        logger.warning("Analysis quality checks were not performed")
         
         # Update manifest to indicate skipped status
         self.manifest_manager.update_stage(

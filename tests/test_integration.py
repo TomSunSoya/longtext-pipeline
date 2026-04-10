@@ -6,6 +6,7 @@ All tests use mocked LLM responses to avoid requiring real API keys.
 """
 
 import json
+import logging
 import os
 import pytest
 import tempfile
@@ -307,7 +308,7 @@ class TestPipelineResume:
     
     def test_pipeline_resume_functionality(
         self, pipeline, sample_input_file, sample_config,
-        mock_llm_response, temp_dir
+        mock_llm_response, temp_dir, caplog
     ):
         """Test resume behavior skipping completed stages.
         
@@ -343,21 +344,19 @@ class TestPipelineResume:
         mock_client2 = create_mock_llm_client(mock_llm_response)
         
         with patch_pipeline_llm_client(mock_client2):
-            
-            # Capture print output to verify skip messages
-            with patch('builtins.print') as mock_print:
+            with caplog.at_level(logging.INFO):
                 result2 = pipeline.run(
                     input_path=sample_input_file,
                     config_path=None,
                     mode="general",
                     resume=True
                 )
-                
-                # Verify resume messages were printed
-                print_calls = [str(call) for call in mock_print.call_args_list]
-                skip_messages = [c for c in print_calls if 'skip' in c.lower() or 'resume' in c.lower()]
-                # Resume should have been attempted
-                assert len(skip_messages) > 0 or len([c for c in print_calls if 'Resum' in c]) > 0, "Expected resume-related messages"
+
+            skip_messages = [
+                message for message in caplog.messages
+                if 'skip' in message.lower() or 'resume' in message.lower()
+            ]
+            assert len(skip_messages) > 0, "Expected resume-related messages"
         
         # Verify manifest was updated
         manifest = manifest_manager.load_manifest(sample_input_file)
@@ -365,7 +364,7 @@ class TestPipelineResume:
     
     def test_pipeline_resume_input_changed(
         self, pipeline, sample_input_file, sample_config,
-        mock_llm_response, temp_dir
+        mock_llm_response, temp_dir, caplog
     ):
         """Test that resume fails gracefully when input file changes.
         
@@ -393,19 +392,21 @@ class TestPipelineResume:
         mock_client2 = create_mock_llm_client(mock_llm_response)
         
         with patch_pipeline_llm_client(mock_client2):
-            
-            with patch('builtins.print') as mock_print:
+            with caplog.at_level(logging.INFO):
                 pipeline.run(
                     input_path=sample_input_file,
                     config_path=None,
                     mode="general",
                     resume=True
                 )
-                
-                # Verify changed input message or fresh manifest message
-                print_calls = [str(call) for call in mock_print.call_args_list]
-                change_or_fresh = [c for c in print_calls if 'changed' in c.lower() or 'fresh' in c.lower() or 'recreate' in c.lower()]
-                assert len(change_or_fresh) > 0, "Expected message about changed input or fresh manifest"
+
+            change_or_fresh = [
+                message for message in caplog.messages
+                if 'changed' in message.lower()
+                or 'fresh' in message.lower()
+                or 'recreate' in message.lower()
+            ]
+            assert len(change_or_fresh) > 0, "Expected message about changed input or fresh manifest"
 
 
 # =============================================================================

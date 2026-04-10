@@ -8,11 +8,12 @@ capabilities, and error handling with the Continue-with-Partial strategy.
 """
 
 import asyncio
+import logging
 import os
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 
 from ..config import (
@@ -30,6 +31,9 @@ from .summarize import SummarizeStage
 from .stage_synthesis import StageSynthesisStage
 from .final_analysis import FinalAnalysisStage
 from .audit import AuditStage
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,18 +130,20 @@ class LongtextPipeline:
                 # Verify the input hasn't changed since the previous run
                 current_input_hash = self._get_input_content_hash(input_path)
                 if not self.manifest_manager.should_resume(manifest, current_input_hash):
-                    print("Input file has changed since last run - cannot resume from existing manifest")
+                    logger.warning(
+                        "Input file has changed since last run; cannot resume from existing manifest"
+                    )
                     # Recreate manifest since it's stale
                     manifest = self.manifest_manager.create_manifest(input_path, current_input_hash)
                     self.manifest_manager.save_manifest(manifest)
                     completed_stages = []
-                    print("Created fresh manifest - will reprocess all stages")
+                    logger.info("Created fresh manifest; reprocessing all stages")
                 else:
                     completed_stages = self.manifest_manager.get_completed_stages(manifest)
-                    print(f"Resume enabled: previous completed stages: {completed_stages}")
+                    logger.info("Resume enabled; completed stages: %s", completed_stages)
             else:
                 completed_stages = []
-                print("Not resuming - will process all stages")
+                logger.info("Not resuming; processing all stages")
 
             # Track current stage for error reporting
             current_stage = None
@@ -152,7 +158,7 @@ class LongtextPipeline:
                 # STAGE 1: INGEST
                 current_stage = "ingest"
                 if not resume or "ingest" not in completed_stages:
-                    print(f"Starting {current_stage} stage...")
+                    logger.info("Starting %s stage", current_stage)
                     parts_result = self._execute_stage_with_error_handling(
                         self._run_ingest_stage, 
                         [input_path, config, manifest], 
@@ -166,12 +172,16 @@ class LongtextPipeline:
                         if parts_result.warnings:
                             for warning in parts_result.warnings:
                                 self.error_aggregator.add_warning(current_stage, warning)
-                        print(f"Ingest stage completed with {len(parts)} parts")
+                        logger.info("Ingest stage completed with %s parts", len(parts))
                     else:
                         # Try to continue with partial result if available
                         if parts_result.data is not None:
                             parts = parts_result.data
-                            print(f"Ingest stage partially completed with {len(parts)} parts, errors: {parts_result.errors}")
+                            logger.warning(
+                                "Ingest stage partially completed with %s parts; errors: %s",
+                                len(parts),
+                                parts_result.errors,
+                            )
                             self.error_aggregator.add_errors(current_stage, parts_result.errors)
                         else:
                             # No viable data to continue
@@ -180,7 +190,7 @@ class LongtextPipeline:
                 else:
                     # Load parts from existing files based on manifest info
                     parts = self._load_parts_from_existing_files(manifest, input_path)
-                    print(f"Resuming: loaded {len(parts)} parts from existing files")
+                    logger.info("Resume loaded %s parts from existing files", len(parts))
                     # Update manifest to ensure stage is marked as complete
                     self.manifest_manager.update_stage(manifest, "ingest", "successful", 
                                                      output_file=f"parts directory for {Path(input_path).name}")
@@ -188,7 +198,7 @@ class LongtextPipeline:
                 # STAGE 2: SUMMARIZE
                 current_stage = "summarize"  
                 if not resume or "summarize" not in completed_stages:
-                    print(f"Starting {current_stage} stage...")
+                    logger.info("Starting %s stage", current_stage)
                     summaries_result = self._execute_stage_with_error_handling(
                         self._run_summarize_stage,
                         [parts, config, manifest, mode],
@@ -197,15 +207,22 @@ class LongtextPipeline:
                     
                     if summaries_result.success and summaries_result.data is not None:
                         all_summaries = summaries_result.data
-                        print(f"Summarize stage completed with {len(all_summaries)} summaries")
+                        logger.info(
+                            "Summarize stage completed with %s summaries",
+                            len(all_summaries),
+                        )
                     else:
                         all_summaries = []
                         if summaries_result.data is not None and len(summaries_result.data) > 0:
                             # We have partial summaries
                             all_summaries = summaries_result.data
-                            print(f"Summarize stage partially completed with {len(all_summaries)} summaries, errors: {len(summaries_result.errors)}")
+                            logger.warning(
+                                "Summarize stage partially completed with %s summaries; errors: %s",
+                                len(all_summaries),
+                                len(summaries_result.errors),
+                            )
                         else:
-                            print(f"Summarize stage failed with no valid partial summaries")
+                            logger.error("Summarize stage failed with no valid partial summaries")
                             
                         self.error_aggregator.add_errors(current_stage, summaries_result.errors)
                         # Handle warnings if available in result
@@ -215,7 +232,10 @@ class LongtextPipeline:
                 else:
                     # Load existing summaries
                     all_summaries = self._load_summaries_from_existing_files(manifest, input_path)
-                    print(f"Resuming: loaded {len(all_summaries)} summaries from existing files")
+                    logger.info(
+                        "Resume loaded %s summaries from existing files",
+                        len(all_summaries),
+                    )
                     # Update manifest to ensure stage is marked as complete
                     self.manifest_manager.update_stage(manifest, "summarize", "successful",
                                                      output_file=f"summaries directory for {Path(input_path).name}")
@@ -223,7 +243,7 @@ class LongtextPipeline:
                 # STAGE 3: STAGE SYNTHESIS
                 current_stage = "stage"
                 if not resume or "stage" not in completed_stages:
-                    print(f"Starting {current_stage} stage...")
+                    logger.info("Starting %s stage", current_stage)
                     synthesis_result = self._execute_stage_with_error_handling(
                         self._run_stage_synthesis_stage,
                         [all_summaries, config, manifest, mode],
@@ -232,15 +252,22 @@ class LongtextPipeline:
                     
                     if synthesis_result.success and synthesis_result.data is not None:
                         all_stages = synthesis_result.data
-                        print(f"Stage synthesis completed with {len(all_stages)} stages")
+                        logger.info(
+                            "Stage synthesis completed with %s stages",
+                            len(all_stages),
+                        )
                     else:
                         all_stages = []
                         if synthesis_result.data is not None and len(synthesis_result.data) > 0:
                             # We have partial stages
                             all_stages = synthesis_result.data
-                            print(f"Stage synthesis partially completed with {len(all_stages)} stages, errors: {len(synthesis_result.errors)}")
+                            logger.warning(
+                                "Stage synthesis partially completed with %s stages; errors: %s",
+                                len(all_stages),
+                                len(synthesis_result.errors),
+                            )
                         else:
-                            print(f"Stage synthesis stage failed with no valid partial stages")
+                            logger.error("Stage synthesis failed with no valid partial stages")
                             
                         self.error_aggregator.add_errors(current_stage, synthesis_result.errors)
                         # Skip warnings since ErrorAggregator only supports errors for now
@@ -250,7 +277,7 @@ class LongtextPipeline:
                 else:
                     # Load existing stages
                     all_stages = self._load_stages_from_existing_files(manifest, input_path)
-                    print(f"Resuming: loaded {len(all_stages)} stages from existing files")
+                    logger.info("Resume loaded %s stages from existing files", len(all_stages))
                     # Update manifest to ensure stage is marked as complete
                     self.manifest_manager.update_stage(manifest, "stage", "successful",
                                                      output_file=f"stages directory for {Path(input_path).name}")
@@ -258,7 +285,7 @@ class LongtextPipeline:
                 # STAGE 4: FINAL ANALYSIS
                 current_stage = "final"
                 if not resume or "final" not in completed_stages:
-                    print(f"Starting {current_stage} stage...")
+                    logger.info("Starting %s stage", current_stage)
                     final_result = self._execute_stage_with_error_handling(
                         self._run_final_analysis_stage,
                         [all_stages, config, manifest, mode],
@@ -267,7 +294,7 @@ class LongtextPipeline:
                     
                     if final_result.success and final_result.data is not None:
                         final_analysis = final_result.data
-                        print("Final analysis stage completed successfully")
+                        logger.info("Final analysis stage completed successfully")
                         
                         # Update manifest final metadata
                         final_analysis.metadata["completed_at"] = datetime.now().isoformat()
@@ -301,10 +328,10 @@ class LongtextPipeline:
                         else:
                             manifest.status = "failed"
                         
-                        print("Final analysis stage encountered errors but pipeline continues")
+                        logger.warning("Final analysis stage encountered errors but pipeline continues")
                         
                 else:
-                    print("Skipping final stage (already completed)")
+                    logger.info("Skipping final stage because it is already completed")
                     final_analysis = self._load_final_analysis_from_file(input_path)
                     # Update manifest to ensure stage is marked as complete
                     self.manifest_manager.update_stage(manifest, "final", "successful",
@@ -315,7 +342,7 @@ class LongtextPipeline:
                 current_stage = "audit" 
                 audit_enabled = config.get("stages", {}).get("audit", {}).get("enabled", False)
                 if audit_enabled and (not resume or "audit" not in completed_stages):
-                    print(f"Starting {current_stage} stage...")
+                    logger.info("Starting %s stage", current_stage)
                     audit_result = self._execute_stage_with_error_handling(
                         self._run_audit_stage,
                         [final_analysis, config, manifest, mode],
@@ -323,11 +350,11 @@ class LongtextPipeline:
                     )
                     
                     if audit_result.success and audit_result.data is not None:
-                        print("Audit stage completed successfully")
+                        logger.info("Audit stage completed successfully")
                         for warning in audit_result.warnings or []:
                             self.error_aggregator.add_warning(current_stage, warning)
                     else:
-                        print("Audit stage encountered errors or produced partial results")
+                        logger.warning("Audit stage encountered errors or produced partial results")
                         if audit_result.errors:
                             self.error_aggregator.add_errors(current_stage, audit_result.errors)
                 elif audit_enabled and resume and "audit" in completed_stages:
@@ -358,7 +385,7 @@ class LongtextPipeline:
         
         except KeyboardInterrupt:
             # Handle Ctrl-C interruption gracefully
-            print("\nPipeline interrupted by user")
+            logger.warning("Pipeline interrupted by user")
             error_msg = "Pipeline interrupted by user"
             all_errors.append(error_msg)
             
@@ -394,14 +421,17 @@ class LongtextPipeline:
             try:
                 if 'manifest' in locals():
                     status_report = format_status(manifest, show_details=True)
-                    print(f"\n=== PIPELINE STATUS ===\n{status_report}")
+                    logger.info("Pipeline status report:\n%s", status_report)
                     
                     # Always save the manifest to persist the current state
                     self.manifest_manager.save_manifest(manifest)
                     
-                    print(f"Manifest saved: {self.manifest_manager._get_manifest_path(input_path)}")
-            except Exception as e:
-                print(f"Failed to generate/render final status report: {str(e)}")
+                    logger.info(
+                        "Manifest saved: %s",
+                        self.manifest_manager._get_manifest_path(input_path),
+                    )
+            except Exception:
+                logger.exception("Failed to generate/render final status report")
         
         # 10. Return FinalAnalysis or partial result with error tracking
         final_analysis.metadata["pipeline_errors"] = all_errors
@@ -462,15 +492,15 @@ class LongtextPipeline:
             if existing_manifest:
                 # Validate hash to make sure input hasn't changed since last run
                 if manifest_manager.should_resume(existing_manifest, input_hash):
-                    print("Using existing manifest for resume")
+                    logger.info("Using existing manifest for resume")
                     return existing_manifest
                 else:
-                    print("Input file has changed since last run, creating new manifest...")
+                    logger.warning("Input file has changed since last run; creating new manifest")
         
         # Create new manifest (either no existing or input changed)
         manifest = manifest_manager.create_manifest(input_path, input_hash)
         manifest_manager.save_manifest(manifest)
-        print(f"Created new manifest: {manifest.session_id}")
+        logger.info("Created new manifest: %s", manifest.session_id)
         return manifest
 
     def _execute_stage_with_error_handling(
@@ -513,7 +543,7 @@ class LongtextPipeline:
         """Run the ingest stage and return the generated parts."""
         stage = IngestStage(manifest_manager=self.manifest_manager)
         result = stage.run(input_path, config, manifest)
-        print(f"Successfully ran ingest stage for {input_path}")
+        logger.info("Successfully ran ingest stage for %s", input_path)
         return result
     
     def _run_summarize_stage(
@@ -526,7 +556,7 @@ class LongtextPipeline:
         """Run the summarize stage (async internally, sync interface)."""
         stage = SummarizeStage(manifest_manager=self.manifest_manager)
         result = asyncio.run(stage.run(parts, config, manifest, mode))
-        print(f"Successfully ran summarize stage for {len(parts)} parts")
+        logger.info("Successfully ran summarize stage for %s parts", len(parts))
         return result
 
     def _run_stage_synthesis_stage(
@@ -539,7 +569,10 @@ class LongtextPipeline:
         """Run the stage synthesis stage (async internally, sync interface)."""
         stage = StageSynthesisStage(manifest_manager=self.manifest_manager)
         result = asyncio.run(stage.run(summaries, config, manifest, mode))
-        print(f"Successfully ran stage synthesis stage for {len(summaries)} summaries")
+        logger.info(
+            "Successfully ran stage synthesis stage for %s summaries",
+            len(summaries),
+        )
         return result
 
     def _run_final_analysis_stage(
@@ -555,7 +588,7 @@ class LongtextPipeline:
         result = asyncio.run(
             stage.run(stages, config, manifest, mode, multi_perspective=multi_perspective)
         )
-        print(f"Successfully ran final analysis stage for {len(stages)} stages")
+        logger.info("Successfully ran final analysis stage for %s stages", len(stages))
         return result
     
     def _run_audit_stage(
@@ -568,7 +601,7 @@ class LongtextPipeline:
         """Run the audit stage."""
         stage = AuditStage(manifest_manager=self.manifest_manager)
         result = stage.run(final_analysis, config, manifest, mode)
-        print("Successfully ran audit stage")
+        logger.info("Successfully ran audit stage")
         return result
     
     def _load_parts_from_existing_files(self, manifest: Manifest, input_path: str) -> List[Part]:
@@ -611,8 +644,8 @@ class LongtextPipeline:
                 i += 1
             
             return parts
-        except Exception as e:
-            print(f"Failed to load existing parts: {e}")
+        except Exception:
+            logger.exception("Failed to load existing parts")
             return []
     
     def _load_summaries_from_existing_files(self, manifest: Manifest, input_path: str) -> list:
@@ -644,12 +677,10 @@ class LongtextPipeline:
                 summaries.append(summary_obj)
                 i += 1
             
-            print(f"Loaded {len(summaries)} summaries from existing files")
+            logger.info("Loaded %s summaries from existing files", len(summaries))
             return summaries
-        except Exception as e:
-            print(f"Failed to load existing summaries: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to load existing summaries")
             return []
     
     def _load_stages_from_existing_files(self, manifest: Manifest, input_path: str) -> list:
@@ -682,12 +713,10 @@ class LongtextPipeline:
                 stages.append(stage_obj)
                 i += 1
             
-            print(f"Loaded {len(stages)} stages from existing files")
+            logger.info("Loaded %s stages from existing files", len(stages))
             return stages
-        except Exception as e:
-            print(f"Failed to load existing stages: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to load existing stages")
             return []
     
     def _load_final_analysis_from_file(self, input_path: str) -> FinalAnalysis:
@@ -711,9 +740,7 @@ class LongtextPipeline:
                 metadata={}
             )
         except Exception as e:
-            print(f"Failed to load existing final analysis: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Failed to load existing final analysis")
             return FinalAnalysis(
                 status="error",
                 stages=[],
@@ -736,10 +763,10 @@ class LongtextPipeline:
                     
                     from ..utils.io import write_file
                     write_file(str(summary_path), rendered_content)
-                except Exception as e:
-                    print(f"Failed to save summary file {summary_path}: {e}")
-        except Exception as e:
-            print(f"Failed to save summaries: {e}")
+                except Exception:
+                    logger.exception("Failed to save summary file %s", summary_path)
+        except Exception:
+            logger.exception("Failed to save summaries")
     
     def _save_stages_to_files(self, stages: list, input_path: str):
         """Save stages to file system."""
@@ -755,10 +782,10 @@ class LongtextPipeline:
                     
                     from ..utils.io import write_file
                     write_file(str(stage_path), rendered_content)
-                except Exception as e:
-                    print(f"Failed to save stage file {stage_path}: {e}")
-        except Exception as e:
-            print(f"Failed to save stages: {e}")
+                except Exception:
+                    logger.exception("Failed to save stage file %s", stage_path)
+        except Exception:
+            logger.exception("Failed to save stages")
     
     def _save_final_analysis_to_file(self, final_analysis: FinalAnalysis, input_path: str):
         """Save final analysis to file system."""  
@@ -773,7 +800,7 @@ class LongtextPipeline:
                 
                 from ..utils.io import write_file
                 write_file(str(final_path), rendered_content)
-            except Exception as e:
-                print(f"Failed to save final analysis file {final_path}: {e}")
-        except Exception as e:
-            print(f"Failed to save final analysis: {e}")
+            except Exception:
+                logger.exception("Failed to save final analysis file %s", final_path)
+        except Exception:
+            logger.exception("Failed to save final analysis")

@@ -6,10 +6,13 @@
 # Environment variable overrides available:
 #   OPENAI_API_KEY       - API key for OpenAI service
 #   OPENAI_BASE_URL      - Base URL for custom OpenAI-compatible endpoints
-#   LONGTEXT_MODEL-provider - Override default model provider
+#   LONGTEXT_MODEL_PROVIDER - Override default model provider
 #   LONGTEXT_MODEL_NAME  - Override default model name
 #   LONGTEXT_OUTPUT_DIR  - Override default output directory
 #   LONGTEXT_PROMPTS_DIR - Override default prompts directory
+#   LONGTEXT_LOG_LEVEL   - Override log level
+#   LONGTEXT_LOG_FORMAT  - Override log format ("text" or "json")
+#   LONGTEXT_LOG_FILE    - Write logs to a file
 
 model:
   provider: "openai"        # Model provider (openai, openrouter, ollama)
@@ -58,3 +61,8 @@ pipeline:
   allow_resume: true       # Enable resumable processing
   audit_enabled: false     # Enable post-processing audit phase
   max_workers: 4           # Max concurrent workers for parallel operations
+
+logging:
+  level: "INFO"            # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "text"           # Log format: "text" or "json"
+  file: null               # Optional log file path

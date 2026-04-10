@@ -20,6 +20,7 @@ def get_llm_client(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     timeout: Optional[float] = None,
+    temperature: Optional[float] = None,
 ) -> LLMClient:
     """Create an LLM client instance based on configuration.
     
@@ -44,6 +45,7 @@ def get_llm_client(
         api_key: API key override (default: from config or env)
         base_url: Base URL override (default: from config or env)
         timeout: Timeout override in seconds (default: from config or 30.0)
+        temperature: Temperature override (default: from config or 0.7)
 
     Returns:
         Configured LLMClient instance (OpenAICompatibleClient for MVP)
@@ -102,6 +104,12 @@ def get_llm_client(
         or model_config.get("timeout")
         or OpenAICompatibleClient.DEFAULT_TIMEOUT
     )
+
+    resolved_temperature = (
+        temperature
+        if temperature is not None
+        else model_config.get("temperature", 0.7)
+    )
     
     # Determine provider (default to "openai" for MVP)
     provider = model_config.get("provider", "openai").lower()
@@ -114,6 +122,7 @@ def get_llm_client(
             api_key=resolved_api_key,
             base_url=resolved_base_url,
             timeout=resolved_timeout,
+            temperature=resolved_temperature,
         )
     else:
         raise ValueError(

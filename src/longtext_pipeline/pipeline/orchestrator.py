@@ -620,7 +620,7 @@ class LongtextPipeline:
         try:
             summaries_dir = Path(input_path).parent / ".longtext" 
             summaries = []
-            from ..models import Summary  # Import the Summary model from models
+            from ..models import Summary
             
             i = 0
             while True:
@@ -632,16 +632,14 @@ class LongtextPipeline:
                 with open(summary_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # Create a basic summary object that preserves essential data
+                # Rehydrate the current Summary dataclass shape from the saved markdown file.
                 summary_obj = Summary(
                     part_index=i,
                     content=content,
-                    key_points=[],    # Would need to extract from content in production if needed
-                    entities_found=[], # Would need to extract from content in production if needed
-                    themes=[],        # Would need to extract from content in production if needed
-                    action_items=[],  # Would need to extract from content in production if needed
-                    additional_notes=[], # Would need to extract from content in production if needed
-                    metadata={"status": "loaded_from_file", "path": str(summary_path)}
+                    metadata={
+                        "status": "loaded_from_file",
+                        "path": str(summary_path),
+                    }
                 )
                 summaries.append(summary_obj)
                 i += 1
@@ -659,7 +657,7 @@ class LongtextPipeline:
         try:
             stages_dir = Path(input_path).parent / ".longtext"
             stages = []
-            from ..models import Stage as StageSummary  # Import the Stage model
+            from ..models import StageSummary
             
             i = 0
             while True:
@@ -671,18 +669,15 @@ class LongtextPipeline:
                 with open(stage_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # Create a basic stage object that preserves essential data
+                # Rehydrate the current StageSummary dataclass shape from the saved markdown file.
                 stage_obj = StageSummary(
                     stage_index=i,
-                    content=content,
-                    summary_count=0,  # This would need to be derived from content if essential
-                    executive_summary="",
-                    key_points=[],
-                    entity_synthesis={},
-                    theme_evolution=[],
-                    consistency_checks=[],
-                    action_items_tracking=[],
-                    metadata={"status": "loaded_from_file", "path": str(stage_path)}
+                    summaries=[],
+                    synthesis=content,
+                    metadata={
+                        "status": "loaded_from_file",
+                        "path": str(stage_path),
+                    }
                 )
                 stages.append(stage_obj)
                 i += 1

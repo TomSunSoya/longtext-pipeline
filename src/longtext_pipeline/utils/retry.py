@@ -7,7 +7,7 @@ import asyncio
 import random
 import time
 from functools import wraps
-from typing import Callable, TypeVar, Optional, Tuple
+from typing import Callable, TypeVar, Optional
 
 from ..errors import (
     PipelineError,
@@ -15,6 +15,17 @@ from ..errors import (
     LLMCommunicationError,
     LLMAuthenticationError,
 )
+
+
+def _get_metrics():
+    """Lazy import of metrics to avoid registration issues during testing."""
+    from .metrics import (
+        retry_attempts_total,
+        retry_delay_seconds,
+        rate_limit_hits_total,
+    )
+
+    return retry_attempts_total, retry_delay_seconds, rate_limit_hits_total
 
 
 class RetryError(PipelineError):
@@ -26,77 +37,6 @@ class RetryError(PipelineError):
 
 
 T = TypeVar("T")
-
-
-def retry_with_backoff(
-    func: Optional[Callable[..., T]] = None,
-    max_retries: int = 3,
-    backoff_factor: float = 2,
-    retry_exceptions: Tuple[type, ...] = (Exception,),
-    max_delay: float = 60.0,
-) -> Callable[..., T]:
-    """
-    Generic retry wrapper with exponential backoff.
-
-    Usage:
-        @retry_with_backoff(max_retries=3, backoff_factor=2)
-        def my_function():
-            pass
-
-        # Or directly:
-        result = retry_with_backoff(my_function, max_retries=5)(args)
-
-    Args:
-        func: Function to wrap (optional when used as decorator)
-        max_retries: Maximum number of retry attempts
-        backoff_factor: Multiplier for delay between retries (exponential)
-        retry_exceptions: Tuple of exception types to retry on
-        max_delay: Maximum delay between retries in seconds
-
-    Returns:
-        Wrapped function with retry logic
-
-    Raises:
-        RetryError: If all retry attempts fail
-    """
-
-    def decorator(f: Callable[..., T]) -> Callable[..., T]:
-        @wraps(f)
-        def wrapper(*args, **kwargs) -> T:
-            last_exception: Optional[Exception] = None
-            delay = 1.0  # Initial delay in seconds
-
-            for attempt in range(max_retries + 1):  # +1 because first attempt is try 0
-                try:
-                    return f(*args, **kwargs)
-                except retry_exceptions as e:
-                    last_exception = e
-
-                    # If we've exhausted retries, raise
-                    if attempt >= max_retries:
-                        raise RetryError(
-                            f"Failed after {max_retries + 1} attempts",
-                            last_exception=last_exception,
-                        )
-
-                    # Apply exponential backoff with jitter
-                    time.sleep(min(delay, max_delay))
-                    delay *= backoff_factor
-
-            # Should never reach here, but just in case
-            if last_exception:
-                raise RetryError(
-                    f"Failed after {max_retries + 1} attempts",
-                    last_exception=last_exception,
-                )
-            raise RetryError(f"Failed after {max_retries + 1} attempts")
-
-        return wrapper
-
-    # Support both @decorator and decorator(func) usage
-    if func is not None:
-        return decorator(func)
-    return decorator
 
 
 def retry_llm_call(
@@ -141,6 +81,7 @@ def retry_llm_call(
         def wrapper(*args, **kwargs) -> T:
             last_exception: Optional[Exception] = None
             delay = initial_delay
+            retry_attempts, retry_delay, rate_limit_hits = _get_metrics()
 
             for attempt in range(max_retries + 1):  # +1 for initial attempt
                 try:
@@ -160,6 +101,16 @@ def retry_llm_call(
                             last_exception=last_exception,
                         )
 
+                    # Record rate limit hit
+                    if isinstance(e, LLMRateLimitError):
+                        rate_limit_hits.labels(stage="unknown").inc()
+
+                    # Record retry attempt
+                    error_type = (
+                        "rate_limit" if isinstance(e, LLMRateLimitError) else "other"
+                    )
+                    retry_attempts.labels(stage="unknown", error_type=error_type).inc()
+
                     # Calculate delay based on error type
                     if isinstance(e, LLMRateLimitError):
                         # Rate limit (429): exponential backoff
@@ -176,6 +127,9 @@ def retry_llm_call(
                     # Cap delay at max_delay
                     sleep_time = min(calculated_delay, max_delay)
 
+                    # Record retry delay
+                    retry_delay.labels(stage="unknown").observe(sleep_time)
+
                     time.sleep(sleep_time)
 
                 except Exception as e:
@@ -188,6 +142,9 @@ def retry_llm_call(
                             last_exception=last_exception,
                         )
 
+                    # Record retry attempt
+                    retry_attempts.labels(stage="unknown", error_type="other").inc()
+
                     calculated_delay = delay * (backoff_factor**attempt)
 
                     if add_jitter:
@@ -195,6 +152,10 @@ def retry_llm_call(
                         calculated_delay += jitter
 
                     sleep_time = min(calculated_delay, max_delay)
+
+                    # Record retry delay
+                    retry_delay.labels(stage="unknown").observe(sleep_time)
+
                     time.sleep(sleep_time)
 
             # Should never reach here
@@ -258,6 +219,7 @@ def _make_async_retry_decorator():
             async def wrapper(*args, **kwargs) -> T:
                 last_exception: Optional[Exception] = None
                 delay = initial_delay
+                retry_attempts, retry_delay, rate_limit_hits = _get_metrics()
 
                 for attempt in range(max_retries + 1):  # +1 for initial attempt
                     try:
@@ -277,6 +239,20 @@ def _make_async_retry_decorator():
                                 last_exception=last_exception,
                             )
 
+                        # Record rate limit hit
+                        if isinstance(e, LLMRateLimitError):
+                            rate_limit_hits.labels(stage="unknown").inc()
+
+                        # Record retry attempt
+                        error_type = (
+                            "rate_limit"
+                            if isinstance(e, LLMRateLimitError)
+                            else "other"
+                        )
+                        retry_attempts.labels(
+                            stage="unknown", error_type=error_type
+                        ).inc()
+
                         # Calculate delay based on error type
                         if isinstance(e, LLMRateLimitError):
                             # Rate limit (429): exponential backoff
@@ -293,6 +269,9 @@ def _make_async_retry_decorator():
                         # Cap delay at max_delay
                         sleep_time = min(calculated_delay, max_delay)
 
+                        # Record retry delay
+                        retry_delay.labels(stage="unknown").observe(sleep_time)
+
                         await asyncio.sleep(sleep_time)
 
                     except Exception as e:
@@ -305,6 +284,9 @@ def _make_async_retry_decorator():
                                 last_exception=last_exception,
                             )
 
+                        # Record retry attempt
+                        retry_attempts.labels(stage="unknown", error_type="other").inc()
+
                         calculated_delay = delay * (backoff_factor**attempt)
 
                         if add_jitter:
@@ -312,6 +294,10 @@ def _make_async_retry_decorator():
                             calculated_delay += jitter
 
                         sleep_time = min(calculated_delay, max_delay)
+
+                        # Record retry delay
+                        retry_delay.labels(stage="unknown").observe(sleep_time)
+
                         await asyncio.sleep(sleep_time)
 
                 # Should never reach here

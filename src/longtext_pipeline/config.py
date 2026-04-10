@@ -283,6 +283,26 @@ def validate_config(config: dict) -> bool:
             if key not in known_model_keys:
                 warnings.warn(f"Unknown configuration key in model: '{key}'")
 
+        # Validate timeout if present
+        if "timeout" in config["model"]:
+            timeout = config["model"]["timeout"]
+            # Type check: must be int or float
+            if not isinstance(timeout, (int, float)):
+                raise ConfigError(
+                    f"model.timeout must be int or float, got {type(timeout).__name__}"
+                )
+            # Upper bound: error if > 600.0s
+            if timeout > 600.0:
+                raise ConfigError(
+                    f"model.timeout must not exceed 600.0 seconds (got {timeout})"
+                )
+            # Lower bound: warning if < 5.0s
+            if timeout < 5.0:
+                warnings.warn(
+                    f"model.timeout is very low ({timeout}s). "
+                    "Consider using at least 5.0 seconds for reliability."
+                )
+
     # Validate stages section
     if "stages" in config:
         stages = config["stages"]
@@ -312,9 +332,44 @@ def validate_config(config: dict) -> bool:
                     warnings.warn(f"Unknown configuration key in stages.final: '{key}'")
 
         if "audit" in stages:
-            for key in stages["audit"]:
+            audit = stages["audit"]
+            for key in audit:
                 if key not in known_audit_keys:
                     warnings.warn(f"Unknown configuration key in stages.audit: '{key}'")
+
+            # Validate audit.enabled type (should be boolean)
+            if "enabled" in audit:
+                enabled = audit["enabled"]
+                if not isinstance(enabled, bool):
+                    warnings.warn(
+                        f"stages.audit.enabled must be boolean, got {type(enabled).__name__}"
+                    )
+
+            # Validate audit.prompt_template type and existence
+            if "prompt_template" in audit:
+                prompt_template = audit["prompt_template"]
+                if not isinstance(prompt_template, str):
+                    warnings.warn(
+                        f"stages.audit.prompt_template must be a string path, got {type(prompt_template).__name__}"
+                    )
+                # If audit.enabled=true, check prompt_template file exists
+                elif audit.get("enabled") is True:
+                    prompts_dir = config.get("prompts", {}).get(
+                        "dir", "./src/longtext_pipeline/prompts"
+                    )
+                    # Extract just the filename from prompt_template (e.g., "prompts/audit_general.txt" → "audit_general.txt")
+                    template_filename = Path(prompt_template).name
+                    template_path = Path(prompts_dir) / template_filename
+                    if not template_path.exists():
+                        warnings.warn(
+                            f"stages.audit.prompt_template file not found: '{template_path}'"
+                        )
+            else:
+                # Warning if enabled=true but no prompt_template specified
+                if audit.get("enabled") is True:
+                    warnings.warn(
+                        "stages.audit.enabled=true but stages.audit.prompt_template is not specified"
+                    )
 
     # Validate prompts section
     if "prompts" in config:

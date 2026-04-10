@@ -105,6 +105,7 @@ class ManifestManager:
                 if stage_info.timestamp
                 else None,
                 "error": stage_info.error,
+                "stats": stage_info.stats,
             }
 
         return {
@@ -141,6 +142,7 @@ class ManifestManager:
                 if stage_data.get("timestamp")
                 else None,
                 error=stage_data.get("error"),
+                stats=stage_data.get("stats"),
             )
 
         return Manifest(
@@ -291,6 +293,7 @@ class ManifestManager:
         stage.status = status
         stage.output_file = output_file
         stage.error = error
+        stage.stats = stats if stats is not None else stage.stats
         stage.timestamp = datetime.now()
         manifest.updated_at = datetime.now()
         manifest.status = status

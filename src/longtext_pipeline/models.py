@@ -16,11 +16,12 @@ class StageInfo:
 
     Attributes:
         name: Stage name (e.g., 'ingest', 'summarize', 'stage', 'final', 'audit')
-        status: Current status ('not_started', 'running', 'successful', 'failed')
+        status: Current status ('not_started', 'running', 'successful', 'failed', 'skipped')
         input_file: Path to input file for this stage
         output_file: Path to output file for this stage
         timestamp: When this stage was processed
         error: Error message if stage failed
+        stats: Optional stage-specific statistics dictionary
     """
 
     name: str
@@ -29,6 +30,7 @@ class StageInfo:
     output_file: Optional[str] = None
     timestamp: Optional[datetime] = None
     error: Optional[str] = None
+    stats: Optional[Dict[str, Any]] = None
 
 
 @dataclass

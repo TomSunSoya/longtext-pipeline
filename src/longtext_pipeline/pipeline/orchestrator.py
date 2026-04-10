@@ -28,6 +28,7 @@ from ..manifest import ManifestManager, Manifest
 from ..models import FinalAnalysis, Part
 from ..renderer import format_status
 from ..utils.process_lock import InterProcessFileLock
+from ..utils.metrics import write_metrics_to_file
 from .ingest import IngestStage
 from .summarize import SummarizeStage
 from .stage_synthesis import StageSynthesisStage
@@ -415,6 +416,7 @@ class LongtextPipeline:
 
                 # STAGE 5: AUDIT (conditional)
                 current_stage = "audit"
+                audit_result = None
                 audit_enabled = (
                     config.get("stages", {}).get("audit", {}).get("enabled", False)
                 )
@@ -430,6 +432,26 @@ class LongtextPipeline:
                         logger.info("Audit stage completed successfully")
                         for warning in audit_result.warnings or []:
                             self.error_aggregator.add_warning(current_stage, warning)
+
+                        # Store audit result in manifest with findings
+                        audit_data = audit_result.data
+                        self.manifest_manager.update_stage(
+                            manifest,
+                            "audit",
+                            "successful",
+                            output_file="audit_report.md",
+                            stats={
+                                "issues_found": audit_data.get("issues_found", 0),
+                                "confidence_score": audit_data.get(
+                                    "confidence_score", 0.0
+                                ),
+                                "recommendations": audit_data.get(
+                                    "recommendations", []
+                                ),
+                                "checked_items": audit_data.get("checked_items", []),
+                                "report_path": audit_data.get("report_path"),
+                            },
+                        )
                     else:
                         logger.warning(
                             "Audit stage encountered errors or produced partial results"
@@ -438,14 +460,37 @@ class LongtextPipeline:
                             self.error_aggregator.add_errors(
                                 current_stage, audit_result.errors
                             )
+                        # Still update manifest with audit failure info
+                        self.manifest_manager.update_stage(
+                            manifest,
+                            "audit",
+                            "failed",
+                            error="; ".join(audit_result.errors)
+                            if audit_result.errors
+                            else "Audit stage failed",
+                        )
                 elif audit_enabled and resume and "audit" in completed_stages:
-                    # Audit stage was previously completed
-                    self.manifest_manager.update_stage(
-                        manifest,
-                        "audit",
-                        "successful",
-                        output_file=f"audit report for {Path(input_path).name}",
-                    )
+                    # Audit stage was previously completed - preserve existing audit findings
+                    audit_stage_info = manifest.stages.get("audit")
+                    if audit_stage_info and audit_stage_info.stats:
+                        # Reload existing audit findings from manifest stats
+                        logger.info(
+                            "Resume: Audit stage already completed, preserving findings"
+                        )
+                        self.manifest_manager.update_stage(
+                            manifest,
+                            "audit",
+                            "successful",
+                            output_file="audit_report.md",
+                            stats=audit_stage_info.stats,
+                        )
+                    else:
+                        self.manifest_manager.update_stage(
+                            manifest,
+                            "audit",
+                            "successful",
+                            output_file="audit_report.md",
+                        )
 
             except Exception as e:
                 error_msg = f"{current_stage} stage failed with error: {str(e)}"
@@ -524,8 +569,17 @@ class LongtextPipeline:
                         "Manifest saved: %s",
                         self.manifest_manager._get_manifest_path(input_path),
                     )
+
+                    # Export metrics to Prometheus format after pipeline completion
+                    output_dir = Path(input_path).parent
+                    write_metrics_to_file(output_dir)
+                    logger.info(
+                        "Metrics exported to %s/.longtext/metrics.prom", output_dir
+                    )
             except Exception:
-                logger.exception("Failed to generate/render final status report")
+                logger.exception(
+                    "Failed to generate/render final status report or export metrics"
+                )
             finally:
                 if run_lock is not None:
                     run_lock.release()

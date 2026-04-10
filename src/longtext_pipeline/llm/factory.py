@@ -23,18 +23,18 @@ def get_llm_client(
     temperature: Optional[float] = None,
 ) -> LLMClient:
     """Create an LLM client instance based on configuration.
-    
+
     This factory function creates the appropriate LLM client based on the
     provided configuration. For MVP, only OpenAI-compatible clients are
     supported, but the interface is designed for easy provider expansion.
-    
+
     Configuration precedence (highest to lowest):
     1. Explicit function arguments
     2. Agent-specific config (config.agents.{agent_type}.model) if agent_type provided
     3. Config dictionary values
     4. Environment variables
     5. Provider defaults
-    
+
     Args:
         config: Configuration dictionary containing LLM settings
         agent_type: Optional agent type for agent-specific model lookup
@@ -49,12 +49,12 @@ def get_llm_client(
 
     Returns:
         Configured LLMClient instance (OpenAICompatibleClient for MVP)
-        
+
     Raises:
         ValueError: If an unsupported provider is specified
         TypeError: If config is not a dictionary
         ConfigError: If agent_type is provided but unknown
-        
+
     Example:
         >>> config = {
         ...     "model": "gpt-4o-mini",
@@ -67,7 +67,7 @@ def get_llm_client(
     """
     if not isinstance(config, dict):
         raise TypeError(f"config must be a dictionary, got {type(config).__name__}")
-    
+
     # Get model config based on agent_type (if provided)
     if agent_type is not None:
         # Use agent-specific model config with fallback to top-level model config
@@ -75,7 +75,7 @@ def get_llm_client(
     else:
         # Use top-level model config directly
         model_config = config.get("model", config)
-    
+
     # Extract values from model_config with environment variable fallbacks
     # Use OpenAICompatibleClient defaults when no value is provided
     resolved_model = (
@@ -85,35 +85,29 @@ def get_llm_client(
         or os.getenv("LONGTEXT_MODEL_NAME")
         or OpenAICompatibleClient.DEFAULT_MODEL
     )
-    
+
     resolved_api_key = (
-        api_key
-        or model_config.get("api_key")
-        or os.getenv("OPENAI_API_KEY")
+        api_key or model_config.get("api_key") or os.getenv("OPENAI_API_KEY")
     )
-    
+
     resolved_base_url = (
         base_url
         or model_config.get("base_url")
         or os.getenv("OPENAI_BASE_URL")
         or OpenAICompatibleClient.DEFAULT_BASE_URL
     )
-    
+
     resolved_timeout = (
-        timeout
-        or model_config.get("timeout")
-        or OpenAICompatibleClient.DEFAULT_TIMEOUT
+        timeout or model_config.get("timeout") or OpenAICompatibleClient.DEFAULT_TIMEOUT
     )
 
     resolved_temperature = (
-        temperature
-        if temperature is not None
-        else model_config.get("temperature", 0.7)
+        temperature if temperature is not None else model_config.get("temperature", 0.7)
     )
-    
+
     # Determine provider (default to "openai" for MVP)
     provider = model_config.get("provider", "openai").lower()
-    
+
     # Create appropriate client based on provider
     # MVP only supports OpenAI-compatible providers
     if provider in ("openai", "openrouter", "ollama", "vllm"):

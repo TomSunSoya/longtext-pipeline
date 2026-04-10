@@ -2,11 +2,17 @@
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.longtext_pipeline.models import FinalAnalysis, Manifest, StageInfo, StageSummary, Summary
+from src.longtext_pipeline.models import (
+    FinalAnalysis,
+    Manifest,
+    StageInfo,
+    StageSummary,
+    Summary,
+)
 from src.longtext_pipeline.pipeline.final_analysis import FinalAnalysisStage
 from src.longtext_pipeline.utils.token_estimator import estimate_tokens
 
@@ -28,7 +34,9 @@ def make_stage_summaries() -> list[StageSummary]:
             stage_index=0,
             summaries=[
                 Summary(part_index=0, content="First summary", metadata={"test": True}),
-                Summary(part_index=1, content="Second summary", metadata={"test": True}),
+                Summary(
+                    part_index=1, content="Second summary", metadata={"test": True}
+                ),
             ],
             synthesis="Stage 0 synthesis",
             metadata={"test": True},
@@ -75,8 +83,12 @@ def make_config() -> dict:
         "agents": {
             "topic_analyst": {"model": {"provider": "openai", "name": "topic-model"}},
             "entity_analyst": {"model": {"provider": "openai", "name": "entity-model"}},
-            "sentiment_analyst": {"model": {"provider": "openai", "name": "sentiment-model"}},
-            "timeline_analyst": {"model": {"provider": "openai", "name": "timeline-model"}},
+            "sentiment_analyst": {
+                "model": {"provider": "openai", "name": "sentiment-model"}
+            },
+            "timeline_analyst": {
+                "model": {"provider": "openai", "name": "timeline-model"}
+            },
             "analyst": {"model": {"provider": "openai", "name": "meta-model"}},
         },
     }
@@ -90,7 +102,9 @@ async def test_multi_perspective_run_records_specialist_metadata(tmp_path):
     manifest = make_manifest(tmp_path)
     config = make_config()
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         return {
             "analyst_type": analyst_type,
             "model_used": model,
@@ -100,15 +114,31 @@ async def test_multi_perspective_run_records_specialist_metadata(tmp_path):
         }
 
     def fake_client_factory(config, agent_type=None, **kwargs):
-        model_name = config["agents"].get(agent_type, {}).get("model", {}).get("name", agent_type or "default")
+        model_name = (
+            config["agents"]
+            .get(agent_type, {})
+            .get("model", {})
+            .get("name", agent_type or "default")
+        )
         return DummyClient(model_name)
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", side_effect=fake_client_factory), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_aggregate_with_meta_agent", AsyncMock(return_value="Integrated analysis")), \
-         patch.object(stage, "_save_final_analysis", return_value=("fake.md", "fake.json")), \
-         patch.object(stage.manifest_manager, "update_stage"), \
-         patch.object(stage.manifest_manager, "save_manifest"):
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            side_effect=fake_client_factory,
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage,
+            "_aggregate_with_meta_agent",
+            AsyncMock(return_value="Integrated analysis"),
+        ),
+        patch.object(
+            stage, "_save_final_analysis", return_value=("fake.md", "fake.json")
+        ),
+        patch.object(stage.manifest_manager, "update_stage"),
+        patch.object(stage.manifest_manager, "save_manifest"),
+    ):
         result = await stage.run(
             stage_summaries=stage_summaries,
             config=config,
@@ -155,7 +185,9 @@ async def test_multi_perspective_falls_back_below_success_threshold(tmp_path):
         "timeline_analyst": "failed",
     }
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         status = results[analyst_type]
         return {
             "analyst_type": analyst_type,
@@ -172,12 +204,21 @@ async def test_multi_perspective_falls_back_below_success_threshold(tmp_path):
         metadata={"multi_perspective_analysis": False, "fallback_used": True},
     )
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=DummyClient("fallback")), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_run_single_pass", AsyncMock(return_value=fallback)) as mock_fallback, \
-         patch.object(stage, "_save_final_analysis", return_value=("fake.md", "fake.json")), \
-         patch.object(stage.manifest_manager, "update_stage"), \
-         patch.object(stage.manifest_manager, "save_manifest"):
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            return_value=DummyClient("fallback"),
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage, "_run_single_pass", AsyncMock(return_value=fallback)
+        ) as mock_fallback,
+        patch.object(
+            stage, "_save_final_analysis", return_value=("fake.md", "fake.json")
+        ),
+        patch.object(stage.manifest_manager, "update_stage"),
+        patch.object(stage.manifest_manager, "save_manifest"),
+    ):
         result = await stage.run(
             stage_summaries=stage_summaries,
             config=config,
@@ -203,10 +244,17 @@ async def test_multi_perspective_routes_specialist_and_meta_agent_types(tmp_path
 
     def fake_client_factory(config, agent_type=None, **kwargs):
         requested_agent_types.append(agent_type)
-        model_name = config["agents"].get(agent_type, {}).get("model", {}).get("name", agent_type or "default")
+        model_name = (
+            config["agents"]
+            .get(agent_type, {})
+            .get("model", {})
+            .get("name", agent_type or "default")
+        )
         return DummyClient(model_name)
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         return {
             "analyst_type": analyst_type,
             "model_used": model,
@@ -215,9 +263,18 @@ async def test_multi_perspective_routes_specialist_and_meta_agent_types(tmp_path
             "status": "completed",
         }
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", side_effect=fake_client_factory), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_aggregate_with_meta_agent", AsyncMock(return_value="Integrated analysis")):
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            side_effect=fake_client_factory,
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage,
+            "_aggregate_with_meta_agent",
+            AsyncMock(return_value="Integrated analysis"),
+        ),
+    ):
         result = await stage._run_multi_perspective(
             stage_summaries=stage_summaries,
             config=config,
@@ -248,10 +305,17 @@ async def test_multi_perspective_respects_configured_agent_count(tmp_path):
 
     def fake_client_factory(config, agent_type=None, **kwargs):
         requested_agent_types.append(agent_type)
-        model_name = config["agents"].get(agent_type, {}).get("model", {}).get("name", agent_type or "default")
+        model_name = (
+            config["agents"]
+            .get(agent_type, {})
+            .get("model", {})
+            .get("name", agent_type or "default")
+        )
         return DummyClient(model_name)
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         return {
             "analyst_type": analyst_type,
             "model_used": model,
@@ -260,9 +324,18 @@ async def test_multi_perspective_respects_configured_agent_count(tmp_path):
             "status": "completed",
         }
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", side_effect=fake_client_factory), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_aggregate_with_meta_agent", AsyncMock(return_value="Integrated analysis")):
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            side_effect=fake_client_factory,
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage,
+            "_aggregate_with_meta_agent",
+            AsyncMock(return_value="Integrated analysis"),
+        ),
+    ):
         result = await stage._run_multi_perspective(
             stage_summaries=stage_summaries,
             config=config,
@@ -297,7 +370,9 @@ async def test_multi_perspective_threshold_scales_with_agent_count(tmp_path):
         "entity_analyst": "failed",
     }
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         return {
             "analyst_type": analyst_type,
             "model_used": model,
@@ -313,9 +388,16 @@ async def test_multi_perspective_threshold_scales_with_agent_count(tmp_path):
         metadata={"fallback_used": True},
     )
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=DummyClient("fallback")), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_run_single_pass", AsyncMock(return_value=fallback)) as mock_fallback:
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            return_value=DummyClient("fallback"),
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage, "_run_single_pass", AsyncMock(return_value=fallback)
+        ) as mock_fallback,
+    ):
         result = await stage._run_multi_perspective(
             stage_summaries=stage_summaries,
             config=config,
@@ -393,7 +475,9 @@ async def test_multi_perspective_limits_specialist_concurrency_with_semaphore(tm
     current_concurrency = 0
     peak_concurrency = 0
 
-    async def fake_generate(analyst_type, stage_summaries, prompt_template, client, model):
+    async def fake_generate(
+        analyst_type, stage_summaries, prompt_template, client, model
+    ):
         nonlocal current_concurrency, peak_concurrency
         current_concurrency += 1
         peak_concurrency = max(peak_concurrency, current_concurrency)
@@ -407,9 +491,18 @@ async def test_multi_perspective_limits_specialist_concurrency_with_semaphore(tm
             "status": "completed",
         }
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=DummyClient("meta-model")), \
-         patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate), \
-         patch.object(stage, "_aggregate_with_meta_agent", AsyncMock(return_value="Integrated analysis")):
+    with (
+        patch(
+            "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+            return_value=DummyClient("meta-model"),
+        ),
+        patch.object(stage, "_generate_specialist_analysis", side_effect=fake_generate),
+        patch.object(
+            stage,
+            "_aggregate_with_meta_agent",
+            AsyncMock(return_value="Integrated analysis"),
+        ),
+    ):
         result = await stage._run_multi_perspective(
             stage_summaries=stage_summaries,
             config=config,
@@ -433,7 +526,10 @@ async def test_single_pass_uses_token_estimator_for_non_whitespace_output(tmp_pa
     client = DummyClient("meta-model")
     client.acomplete = AsyncMock(return_value=response)
 
-    with patch("src.longtext_pipeline.pipeline.final_analysis.get_llm_client", return_value=client):
+    with patch(
+        "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+        return_value=client,
+    ):
         result = await stage._run_single_pass(
             stage_summaries=stage_summaries,
             config=config,

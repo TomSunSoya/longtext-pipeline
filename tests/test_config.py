@@ -1,7 +1,6 @@
 """Tests for configuration loading and local auto-discovery."""
 
 import pytest
-from pathlib import Path
 
 from src.longtext_pipeline.config import (
     AUTO_CONFIG_FILENAMES,
@@ -180,7 +179,5 @@ def test_validate_config_accepts_specialist_count_without_warning():
         result = validate_config(config)
 
     assert result is True
-    matching = [
-        warning for warning in w if "specialist_count" in str(warning.message)
-    ]
+    matching = [warning for warning in w if "specialist_count" in str(warning.message)]
     assert matching == []

@@ -1,9 +1,7 @@
 """Tests for async LLM client methods."""
 
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from unittest.mock import call
 
 from src.longtext_pipeline.llm.factory import get_llm_client
 from src.longtext_pipeline.llm.openai_compatible import OpenAICompatibleClient
@@ -46,13 +44,16 @@ class TestAsyncComplete:
         """Test that acomplete() returns the expected text response."""
         config = make_llm_config()
 
-        mock_response = {
-            "choices": [{"message": {"content": "Test response"}}]
-        }
+        mock_response = {"choices": [{"message": {"content": "Test response"}}]}
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
             result = await client.acomplete("Test prompt")
 
         assert result == "Test response"
@@ -69,8 +70,15 @@ class TestAsyncComplete:
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
-            await client.acomplete("Test prompt", system_prompt="You are a helpful assistant.")
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
+            await client.acomplete(
+                "Test prompt", system_prompt="You are a helpful assistant."
+            )
 
             # Verify system prompt was included in request
             call_args = mock_request.call_args
@@ -91,7 +99,12 @@ class TestAsyncComplete:
             "choices": [{"message": {"content": "Deterministic response"}}]
         }
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
             await client.acomplete("Test prompt")
 
         payload = mock_request.call_args[0][0]
@@ -102,21 +115,28 @@ class TestAsyncComplete:
         """Test that acomplete() raises error on empty content."""
         config = make_llm_config()
 
-        mock_response = {
-            "choices": [{"message": {"content": ""}}]
-        }
+        mock_response = {"choices": [{"message": {"content": ""}}]}
 
         client = get_llm_client(config)
 
         # Test internal method without retry decorator
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             # Directly test _async_complete to bypass retry decorator
             with pytest.raises(Exception) as exc_info:
                 await client._async_complete("Test prompt")
 
             # The internal method should raise LLMResponseError for empty content
             # But it's wrapped by retry, so check for retry error with inner exception
-            assert "RetryError" in type(exc_info.value).__name__ or "Empty" in str(exc_info.value) or "No choices" in str(exc_info.value)
+            assert (
+                "RetryError" in type(exc_info.value).__name__
+                or "Empty" in str(exc_info.value)
+                or "No choices" in str(exc_info.value)
+            )
 
     @pytest.mark.asyncio
     async def test_acomplete_no_choices_raises_error(self):
@@ -128,11 +148,18 @@ class TestAsyncComplete:
         client = get_llm_client(config)
 
         # Test internal method directly without retry decorator
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             with pytest.raises(Exception) as exc_info:
                 await client._async_complete("Test prompt")
 
-            assert "RetryError" in type(exc_info.value).__name__ or "No choices" in str(exc_info.value)
+            assert "RetryError" in type(exc_info.value).__name__ or "No choices" in str(
+                exc_info.value
+            )
 
 
 class TestAsyncCompleteJson:
@@ -149,7 +176,12 @@ class TestAsyncCompleteJson:
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await client.acomplete_json("Test prompt")
 
         assert result == {"key": "value", "number": 42}
@@ -159,14 +191,19 @@ class TestAsyncCompleteJson:
         """Test that acomplete_json() adds JSON instruction to system prompt."""
         config = make_llm_config()
 
-        mock_response = {
-            "choices": [{"message": {"content": '{"result": "success"}'}}]
-        }
+        mock_response = {"choices": [{"message": {"content": '{"result": "success"}'}}]}
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
-            await client.acomplete_json("Test prompt", system_prompt="Provide analysis.")
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
+            await client.acomplete_json(
+                "Test prompt", system_prompt="Provide analysis."
+            )
 
             # Verify JSON instruction was added
             call_args = mock_request.call_args
@@ -181,13 +218,16 @@ class TestAsyncCompleteJson:
         """Test that acomplete_json() returns empty dict on empty content."""
         config = make_llm_config()
 
-        mock_response = {
-            "choices": [{"message": {"content": ""}}]
-        }
+        mock_response = {"choices": [{"message": {"content": ""}}]}
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await client.acomplete_json("Test prompt")
 
         assert result == {}
@@ -197,20 +237,25 @@ class TestAsyncCompleteJson:
         """Test that acomplete_json() raises error on invalid JSON."""
         config = make_llm_config()
 
-        mock_response = {
-            "choices": [{"message": {"content": "Not valid JSON"}}]
-        }
+        mock_response = {"choices": [{"message": {"content": "Not valid JSON"}}]}
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             with pytest.raises(Exception) as exc_info:
                 # Bypass retry decorator by calling internal method
                 await client._async_complete_json("Test prompt")
 
             # The internal method should raise LLMResponseError for invalid JSON
             # But it's wrapped by retry, so check for retry error with inner exception
-            assert "RetryError" in type(exc_info.value).__name__ or "Invalid JSON" in str(exc_info.value)
+            assert "RetryError" in type(
+                exc_info.value
+            ).__name__ or "Invalid JSON" in str(exc_info.value)
 
 
 class TestAsyncRetryDecorator:
@@ -323,9 +368,11 @@ class TestAsyncClientIntegration:
         with patch("httpx.AsyncClient") as mock_async_client_cls:
             mock_async_client = MagicMock()
             mock_async_client.post = mock_post
-            mock_async_client_cls.return_value.__aenter__.return_value = mock_async_client
+            mock_async_client_cls.return_value.__aenter__.return_value = (
+                mock_async_client
+            )
 
-            result = await client.acomplete("Test")
+            await client.acomplete("Test")
 
             # Verify AsyncClient was instantiated with correct params
             mock_async_client_cls.assert_called_once()
@@ -346,7 +393,12 @@ class TestAsyncClientIntegration:
 
         mock_response = {"choices": [{"message": {"content": "ok"}}]}
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
             result = await client.acomplete("Test")
 
         assert result == "ok"
@@ -362,13 +414,20 @@ class TestAsyncIntegration:
         """Test complete chain: factory -> client -> acomplete with mock."""
         config = make_llm_config()
 
-        mock_response = {"choices": [{"message": {"content": "Integration test response"}}]}
+        mock_response = {
+            "choices": [{"message": {"content": "Integration test response"}}]
+        }
 
         # Step 1: Get client from factory
         client = get_llm_client(config)
 
         # Step 2: Mock async request and call acomplete
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
             result = await client.acomplete("Integration test prompt")
 
         # Step 3: Verify the response
@@ -391,7 +450,12 @@ class TestAsyncIntegration:
         client = get_llm_client(config)
 
         # Call acomplete_json
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await client.acomplete_json("Generate case study")
 
         # Verify JSON response was parsed correctly
@@ -409,7 +473,12 @@ class TestAsyncIntegration:
         client = get_llm_client(config)
 
         # Mock the internal request method for both sync and async
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             async_result = await client.acomplete("Test prompt")
 
         # Note: We can't actually test sync with same mock because _make_request is different
@@ -428,10 +497,14 @@ class TestAsyncIntegration:
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response) as mock_request:
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_request:
             result = await client.acomplete(
-                "Analyze Q3 performance",
-                system_prompt=expected_system_content
+                "Analyze Q3 performance", system_prompt=expected_system_content
             )
 
         # Verify result
@@ -459,7 +532,12 @@ class TestAsyncIntegration:
 
         mock_response = {"choices": [{"message": {"content": "OK"}}]}
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await client.acomplete("Test")
 
         assert result == "OK"
@@ -467,9 +545,6 @@ class TestAsyncIntegration:
     @pytest.mark.asyncio
     async def test_async_retry_on_client_level(self):
         """Test that async retry decorator works at client level."""
-        from src.longtext_pipeline.utils.retry import retry_llm_call_async
-
-        call_count = 0
 
         # Add a method with retry decorator to client
         config = make_llm_config()
@@ -477,7 +552,9 @@ class TestAsyncIntegration:
         client = get_llm_client(config)
 
         # Test that acomplete has the retry decorator
-        assert hasattr(client.acomplete, "__wrapped__") or hasattr(client.acomplete, "__name__")
+        assert hasattr(client.acomplete, "__wrapped__") or hasattr(
+            client.acomplete, "__name__"
+        )
 
     @pytest.mark.asyncio
     async def test_async_json_flow_allows_empty_content(self):
@@ -488,10 +565,13 @@ class TestAsyncIntegration:
 
         client = get_llm_client(config)
 
-        with patch.object(client, "_async_make_request", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            client,
+            "_async_make_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await client.acomplete_json("Test")
 
         # Empty content should return empty dict, not raise
         assert result == {}
-
-

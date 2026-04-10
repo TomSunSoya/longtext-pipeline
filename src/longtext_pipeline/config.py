@@ -8,7 +8,7 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -186,7 +186,9 @@ def load_runtime_config(
         loaded_sources.append(str(explicit_path))
 
     auto_path = find_auto_config_path(search_dir)
-    if auto_path is not None and (explicit_path is None or auto_path.resolve() != explicit_path):
+    if auto_path is not None and (
+        explicit_path is None or auto_path.resolve() != explicit_path
+    ):
         config = _deep_merge(config, _load_yaml_file(auto_path))
         loaded_sources.append(str(auto_path))
 
@@ -245,7 +247,14 @@ def validate_config(config: dict) -> bool:
     }
 
     # Known nested keys per section
-    known_model_keys = {"provider", "name", "base_url", "api_key", "temperature", "timeout"}
+    known_model_keys = {
+        "provider",
+        "name",
+        "base_url",
+        "api_key",
+        "temperature",
+        "timeout",
+    }
     known_ingest_keys = {"chunk_size", "overlap_rate"}
     known_summarize_keys = {"prompt_template", "batch_size"}
     known_stage_keys = {"group_size", "prompt_template"}
@@ -255,7 +264,12 @@ def validate_config(config: dict) -> bool:
     known_output_keys = {"dir", "naming", "save_intermediate"}
     known_naming_keys = {"summarize_prefix", "stage_prefix", "final_filename"}
     known_input_keys = {"file_path", "encoding"}
-    known_pipeline_keys = {"allow_resume", "audit_enabled", "max_workers", "specialist_count"}
+    known_pipeline_keys = {
+        "allow_resume",
+        "audit_enabled",
+        "max_workers",
+        "specialist_count",
+    }
     known_logging_keys = {"level", "format", "file"}
 
     # Check top-level keys
@@ -276,7 +290,9 @@ def validate_config(config: dict) -> bool:
         if "ingest" in stages:
             for key in stages["ingest"]:
                 if key not in known_ingest_keys:
-                    warnings.warn(f"Unknown configuration key in stages.ingest: '{key}'")
+                    warnings.warn(
+                        f"Unknown configuration key in stages.ingest: '{key}'"
+                    )
 
         if "summarize" in stages:
             for key in stages["summarize"]:
@@ -288,23 +304,17 @@ def validate_config(config: dict) -> bool:
         if "stage" in stages:
             for key in stages["stage"]:
                 if key not in known_stage_keys:
-                    warnings.warn(
-                        f"Unknown configuration key in stages.stage: '{key}'"
-                    )
+                    warnings.warn(f"Unknown configuration key in stages.stage: '{key}'")
 
         if "final" in stages:
             for key in stages["final"]:
                 if key not in known_final_keys:
-                    warnings.warn(
-                        f"Unknown configuration key in stages.final: '{key}'"
-                    )
+                    warnings.warn(f"Unknown configuration key in stages.final: '{key}'")
 
         if "audit" in stages:
             for key in stages["audit"]:
                 if key not in known_audit_keys:
-                    warnings.warn(
-                        f"Unknown configuration key in stages.audit: '{key}'"
-                    )
+                    warnings.warn(f"Unknown configuration key in stages.audit: '{key}'")
 
     # Validate prompts section
     if "prompts" in config:
@@ -398,7 +408,7 @@ def _substitute_env_vars(value: Any) -> Any:
         return value
 
     # Pattern for ${VAR_NAME:-default} or ${VAR_NAME}
-    pattern = r'\$\{([^}:]+)(?::-([^}]*))?\}'
+    pattern = r"\$\{([^}:]+)(?::-([^}]*))?\}"
 
     def replace_match(match):
         var_name = match.group(1)
@@ -589,11 +599,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     result = _deep_copy(base)
 
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = _deep_copy(value)

@@ -5,8 +5,6 @@ Provides atomic write operations and hash validation for stale checkpoint detect
 """
 
 import json
-import os
-import tempfile
 import random
 import string
 import threading
@@ -66,7 +64,9 @@ class ManifestManager:
             Unique session identifier
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        random_suffix = "".join(
+            random.choices(string.ascii_lowercase + string.digits, k=6)
+        )
         return f"{timestamp}_{random_suffix}"
 
     def _ensure_output_structure(self, manifest_path: Path) -> None:
@@ -101,8 +101,10 @@ class ManifestManager:
                 "status": stage_info.status,
                 "input_file": stage_info.input_file,
                 "output_file": stage_info.output_file,
-                "timestamp": stage_info.timestamp.isoformat() if stage_info.timestamp else None,
-                "error": stage_info.error
+                "timestamp": stage_info.timestamp.isoformat()
+                if stage_info.timestamp
+                else None,
+                "error": stage_info.error,
             }
 
         return {
@@ -115,7 +117,7 @@ class ManifestManager:
             "stages": stages_dict,
             "total_parts": manifest.total_parts,
             "total_stages": manifest.total_stages,
-            "estimated_tokens": manifest.estimated_tokens
+            "estimated_tokens": manifest.estimated_tokens,
         }
 
     def _convert_from_dict(self, data: Dict[str, Any]) -> Manifest:
@@ -135,8 +137,10 @@ class ManifestManager:
                 status=stage_data.get("status", "not_started"),
                 input_file=stage_data.get("input_file"),
                 output_file=stage_data.get("output_file"),
-                timestamp=datetime.fromisoformat(stage_data["timestamp"]) if stage_data.get("timestamp") else None,
-                error=stage_data.get("error")
+                timestamp=datetime.fromisoformat(stage_data["timestamp"])
+                if stage_data.get("timestamp")
+                else None,
+                error=stage_data.get("error"),
             )
 
         return Manifest(
@@ -148,11 +152,13 @@ class ManifestManager:
             updated_at=datetime.fromisoformat(data["updated_at"]),
             status=data["status"],
             total_parts=data.get("total_parts"),
-            total_stages=data.get("total_stages"), 
-            estimated_tokens=data.get("estimated_tokens")
+            total_stages=data.get("total_stages"),
+            estimated_tokens=data.get("estimated_tokens"),
         )
 
-    def create_manifest(self, input_path: str, content_hash: Optional[str] = None) -> Manifest:
+    def create_manifest(
+        self, input_path: str, content_hash: Optional[str] = None
+    ) -> Manifest:
         """
         Create a new manifest for a pipeline session.
 
@@ -168,6 +174,7 @@ class ManifestManager:
 
         if content_hash is None:
             from .utils.io import read_file
+
             content = read_file(input_path)
             content_hash = hash_content(content)
 
@@ -180,7 +187,9 @@ class ManifestManager:
             "summarize": StageInfo(name="summarize", status="not_started"),
             "stage": StageInfo(name="stage", status="not_started"),
             "final": StageInfo(name="final", status="not_started"),
-            "audit": StageInfo(name="audit", status="skipped")  # Audit skipped by default
+            "audit": StageInfo(
+                name="audit", status="skipped"
+            ),  # Audit skipped by default
         }
 
         manifest = Manifest(
@@ -190,7 +199,7 @@ class ManifestManager:
             stages=stages,
             created_at=now,
             updated_at=now,
-            status="not_started"
+            status="not_started",
         )
 
         return manifest
@@ -213,7 +222,7 @@ class ManifestManager:
             return None
 
         try:
-            with open(manifest_path, 'r', encoding='utf-8') as f:
+            with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             return self._convert_from_dict(data)
@@ -253,10 +262,15 @@ class ManifestManager:
             except Exception as e:
                 raise ManifestError(f"Failed to save manifest to {manifest_path}: {e}")
 
-    def update_stage(self, manifest: Manifest, stage_name: str,
-                      status: str, output_file: Optional[str] = None,
-                      error: Optional[str] = None,
-                      stats: Optional[Dict[str, Any]] = None) -> None:
+    def update_stage(
+        self,
+        manifest: Manifest,
+        stage_name: str,
+        status: str,
+        output_file: Optional[str] = None,
+        error: Optional[str] = None,
+        stats: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Update stage progress in manifest.
 
@@ -334,11 +348,15 @@ class ManifestManager:
         Returns:
             List of completed stage names
         """
-        return [name for name, stage in manifest.stages.items()
-                if stage.status == "successful"]
+        return [
+            name
+            for name, stage in manifest.stages.items()
+            if stage.status == "successful"
+        ]
 
-    def create_from_existing(self, existing_manifest: Manifest,
-                             input_hash: str) -> Optional[Manifest]:
+    def create_from_existing(
+        self, existing_manifest: Manifest, input_hash: str
+    ) -> Optional[Manifest]:
         """
         Create a resumed manifest from existing one with hash validation.
 
@@ -356,4 +374,5 @@ class ManifestManager:
 
 class ManifestError(Exception):
     """Raised when manifest operation fails."""
+
     pass

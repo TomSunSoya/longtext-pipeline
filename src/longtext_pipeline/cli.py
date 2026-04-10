@@ -79,7 +79,7 @@ def run(
     multi_perspective: Annotated[
         bool,
         typer.Option(
-            "--multi-perspective", 
+            "--multi-perspective",
             "-mp",
             help="Enable multi-perspective analysis with parallel specialist agents.",
         ),
@@ -135,20 +135,22 @@ def run(
     try:
         # Step 1: Validate input file (exists, valid extension .txt/.md)
         input_path = _validate_input_file(input_file)
-        
+
         # Step 2: Load config from explicit config + auto-discovered local config + env overrides
-        final_config, loaded_sources = load_runtime_config(config, search_dir=Path.cwd())
+        final_config, loaded_sources = load_runtime_config(
+            config, search_dir=Path.cwd()
+        )
         configure_logging(final_config)
 
         missing_settings = get_missing_required_settings(final_config)
         if missing_settings:
             typer.echo(format_missing_settings_message(missing_settings), err=True)
             return 1
-        
+
         # Update prompts based on mode
         if "prompts" in final_config and mode == "relationship":
             final_config["prompts"]["format"] = "relationship"
-        
+
         effective_multi_perspective = multi_perspective or agent_count is not None
         final_config["multi_perspective"] = effective_multi_perspective
         if max_workers is not None:
@@ -157,10 +159,10 @@ def run(
         if agent_count is not None:
             final_config.setdefault("pipeline", {})
             final_config["pipeline"]["specialist_count"] = agent_count
-        
+
         # Step 3: Initialize LongtextPipeline from orchestrator
         pipeline = LongtextPipeline()
-        
+
         # Step 4: Execute pipeline with appropriate parameters
         typer.echo(f"Starting pipeline for: {input_path}")
         typer.echo(f"Mode: {mode}")
@@ -175,7 +177,7 @@ def run(
         else:
             typer.echo("Config sources: built-in defaults")
         typer.echo()
-        
+
         # Step 5: Run pipeline with error handling
         try:
             final_analysis = pipeline.run(
@@ -187,20 +189,26 @@ def run(
                 specialist_count=agent_count,
                 max_workers=max_workers,
             )
-            
+
             # Step 6: Determine exit code based on result
-            status = final_analysis.status if hasattr(final_analysis, 'status') else "unknown"
-            
+            status = (
+                final_analysis.status
+                if hasattr(final_analysis, "status")
+                else "unknown"
+            )
+
             if status == "completed":
                 typer.echo("\n[PASS] Pipeline completed successfully")
                 return 0
             elif status in ("partial_success", "completed_with_issues"):
-                typer.echo("\n[PARTIAL] Pipeline completed with partial results or issues")
+                typer.echo(
+                    "\n[PARTIAL] Pipeline completed with partial results or issues"
+                )
                 return 2
             else:
                 typer.echo(f"\n[FAIL] Pipeline failed with status: {status}")
                 return 1
-                
+
         except KeyboardInterrupt:
             logger.warning("Pipeline interrupted by user")
             typer.echo("\nPipeline interrupted by user")
@@ -209,7 +217,7 @@ def run(
             logger.exception("Pipeline execution failed")
             typer.echo(f"\n[FAIL] Pipeline execution failed: {e}")
             return 1
-            
+
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         return 1
@@ -230,33 +238,35 @@ def run(
 
 def _validate_input_file(input_path: str) -> str:
     """Validate that input file exists and has supported format.
-    
+
     Args:
         input_path: Path to the input file to validate
-        
+
     Returns:
         Resolved absolute path to the input file
-        
+
     Raises:
         FileNotFoundError: If file does not exist
         PermissionError: If file cannot be read
         ValueError: If file extension is not .txt or .md
     """
     path = Path(input_path).resolve()
-    
+
     # Check if file exists
     if not path.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
-    
+
     # Check if file is readable
     if not path.is_file():
         raise ValueError(f"Input path is not a file: {input_path}")
-    
+
     # Check extension (only txt/md supported)
     ext = path.suffix.lower()
-    if ext not in ['.txt', '.md']:
-        raise ValueError(f"Unsupported file format. Only .txt and .md files are supported, got: {ext}")
-    
+    if ext not in [".txt", ".md"]:
+        raise ValueError(
+            f"Unsupported file format. Only .txt and .md files are supported, got: {ext}"
+        )
+
     return str(path)
 
 
@@ -291,32 +301,37 @@ def status(
         if not input_path.exists():
             typer.echo(f"Error: Input file '{input_file}' does not exist.", err=True)
             return 1
-        
+
         if not input_path.is_file():
             typer.echo(f"Error: Input path is not a file: {input_file}", err=True)
             return 1
-        
+
         # Check extension (only txt/md supported)
         ext = input_path.suffix.lower()
-        if ext not in ['.txt', '.md']:
-            typer.echo(f"Error: Unsupported file type '{ext}'. Supported: .txt, .md.", err=True)
+        if ext not in [".txt", ".md"]:
+            typer.echo(
+                f"Error: Unsupported file type '{ext}'. Supported: .txt, .md.", err=True
+            )
             return 1
-        
+
         # Step 2: Load manifest from .longtext/manifest.json
         manifest_manager = ManifestManager()
         manifest = manifest_manager.load_manifest(str(input_path))
-        
+
         # Step 3: Check if manifest exists
         if manifest is None:
-            typer.echo(f"Analysis status not found for file '{input_file}'. Has it been processed?", err=True)
+            typer.echo(
+                f"Analysis status not found for file '{input_file}'. Has it been processed?",
+                err=True,
+            )
             return 1
-        
+
         # Step 4: Format and display status using renderer
         status_output = format_status(manifest, show_details=True)
         typer.echo(status_output)
-        
+
         return 0
-        
+
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         return 1
@@ -360,28 +375,32 @@ def init(
     try:
         # Step 1: Validate target directory (check exists, is writable)
         target_path = Path(dir).resolve()
-        
+
         # Create directory if needed
         if not target_path.exists():
             try:
                 target_path.mkdir(parents=True, exist_ok=True)
                 typer.echo(f"Created directory: {target_path}")
             except PermissionError:
-                typer.echo(f"Error: No permission to create directory: {target_path}", err=True)
+                typer.echo(
+                    f"Error: No permission to create directory: {target_path}", err=True
+                )
                 return 1
             except Exception as e:
-                typer.echo(f"Error: Failed to create directory {target_path}: {e}", err=True)
+                typer.echo(
+                    f"Error: Failed to create directory {target_path}: {e}", err=True
+                )
                 return 1
         else:
             # Check if directory is writeable
             if not os.access(target_path, os.W_OK):
                 typer.echo(f"Error: Directory {target_path} is not writable", err=True)
                 return 1
-        
+
         # Step 2: Create configuration templates
         config_general_content = generate_config_general_template()
         config_relationship_content = generate_config_relationship_template()
-        
+
         # Step 3: Create files with confirmation if they already exist
         files_to_create = [
             ("config.general.yaml", config_general_content),
@@ -390,20 +409,19 @@ def init(
             ("sample_input.txt", generate_sample_input_content()),
             ("README.md", generate_quickstart_readme_content()),
         ]
-        
+
         for filename, content in files_to_create:
             filepath = target_path / filename
             if filepath.exists():
                 # Ask for overwrite confirmation using typer.confirm
                 should_overwrite = typer.confirm(
-                    f"File {filename} already exists. Overwrite?",
-                    default=False
+                    f"File {filename} already exists. Overwrite?", default=False
                 )
-                
+
                 if not should_overwrite:
                     typer.echo(f"Skipping {filename}...")
                     continue
-            
+
             try:
                 write_file(filepath, content)
                 typer.echo(f"Created {filepath}")
@@ -413,17 +431,25 @@ def init(
             except Exception as e:
                 typer.echo(f"Error: Failed to write {filepath}: {e}", err=True)
                 return 1
-        
-        typer.echo(f"\nInitialization complete! Configuration files created in: {target_path}")
+
+        typer.echo(
+            f"\nInitialization complete! Configuration files created in: {target_path}"
+        )
         typer.echo("\nTo get started:")
         typer.echo("- Review config.general.yaml for general analysis settings")
-        typer.echo("- Review config.relationship.yaml for relationship-focused analysis")
-        typer.echo(f"- Put your local API/model settings in {AUTO_CONFIG_FILENAMES[0]} (auto-loaded on startup)")
+        typer.echo(
+            "- Review config.relationship.yaml for relationship-focused analysis"
+        )
+        typer.echo(
+            f"- Put your local API/model settings in {AUTO_CONFIG_FILENAMES[0]} (auto-loaded on startup)"
+        )
         typer.echo("- Create your own input text file (.txt or .md)")
-        typer.echo("- Run with: longtext run your_input.txt --config config.general.yaml")
-        
+        typer.echo(
+            "- Run with: longtext run your_input.txt --config config.general.yaml"
+        )
+
         return 0
-        
+
     except Exception as e:
         logger.exception("Unexpected error during initialization")
         typer.echo(f"Unexpected error during initialization: {e}", err=True)
@@ -456,34 +482,36 @@ def main(
 def generate_config_general_template() -> str:
     """Generate default general analysis configuration template."""
     default_config = DEFAULT_CONFIG.copy()
-    
+
     # Remove input-specific path requirement
     config_copy = default_config.copy()
     config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"
     config_copy["model"]["api_key"] = "${OPENAI_API_KEY}"  # Use environment variable
-    
+
     return yaml.dump(config_copy, default_flow_style=False, indent=2)
 
 
 def generate_config_relationship_template() -> str:
     """Generate example relationship-focused analysis configuration template."""
     default_config = DEFAULT_CONFIG.copy()
-    
+
     # Adapt for relationship analysis mode
     config_copy = default_config.copy()
     config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"
     config_copy["model"]["api_key"] = "${OPENAI_API_KEY}"  # Use environment variable
     config_copy["prompts"]["format"] = "relationship"
-    
+
     # Update prompt templates for relationship analysis
-    config_copy["stages"]["summarize"]["prompt_template"] = "prompts/summary_relationship.txt"
+    config_copy["stages"]["summarize"]["prompt_template"] = (
+        "prompts/summary_relationship.txt"
+    )
     config_copy["stages"]["stage"]["prompt_template"] = "prompts/stage_relationship.txt"
     config_copy["stages"]["final"]["prompt_template"] = "prompts/final_relationship.txt"
-    
+
     # Make relationship analysis specific changes
     config_copy["stages"]["audit"]["enabled"] = True
     config_copy["stages"]["audit"]["prompt_template"] = "prompts/audit_relationship.txt"
-    
+
     return yaml.dump(config_copy, default_flow_style=False, indent=2)
 
 

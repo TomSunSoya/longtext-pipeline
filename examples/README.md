@@ -1,70 +1,25 @@
-# Example Configuration Templates
+# Example Configurations
 
-Two example configuration files are provided in this directory:
+This directory contains starter configurations for common longtext-pipeline workflows.
 
-## `config.general.yaml`
+## Files
 
-Standard configuration for general-purpose text analysis and summarization.
+- `config.default.yaml` — fully annotated reference config
+- `config.general.yaml` — standard summarization and analysis
+- `config.relationship.yaml` — relationship-focused analysis
+- `config.multi_agent.yaml` — multi-perspective final synthesis with specialist models
+- `config.performance_test.yaml` — performance-oriented tuning
 
-**Use this for:**
-- Meeting transcripts and minutes
-- Project documentation synthesis
-- Knowledge base summarization
-- Chat log analysis
-- General document processing
-
-**Key settings:**
-- Model: gpt-4o-mini (cost-effective, fast)
-- Chunk size: 4000 characters
-- Temperature: 0.7 (balanced creativity)
-- Format: "general"
-
-## `config.relationship.yaml` (EXPERIMENTAL)
-
-Specialized configuration for entity relationship mapping and network analysis.
-
-**Use this for:**
-- Organizational network mapping
-- Stakeholder relationship extraction
-- Communication flow analysis
-- Timeline reconstruction
-- Conflict/opportunity identification
-
-**Key differences from general:**
-- Model: gpt-4o (higher quality for nuanced relationships)
-- Smaller chunks: 3500 characters (preserve entity context)
-- Lower temperature: 0.5 (more consistent entity naming)
-- Higher overlap: 0.15 (capture spanning relationships)
-- Format: "relationship"
-
-## Usage
+## Typical usage
 
 ```bash
-# General analysis
-longtext run my_document.txt --config examples/config.general.yaml
-
-# Relationship analysis (experimental)
-longtext run meeting_transcript.txt --config examples/config.relationship.yaml
+longtext run input.txt --config examples/config.general.yaml
+longtext run input.txt --config examples/config.relationship.yaml
+longtext run input.txt --config examples/config.multi_agent.yaml --multi-perspective
 ```
 
-## Environment Variables
+## Notes
 
-Both configurations support environment variable overrides:
-
-- `OPENAI_API_KEY` - Your OpenAI API key (required)
-- `OPENAI_BASE_URL` - Custom API endpoint
-- `LONGTEXT_MODEL_PROVIDER` - Override provider
-- `LONGTEXT_MODEL_NAME` - Override model name
-- `LONGTEXT_OUTPUT_DIR` - Custom output directory
-- `LONGTEXT_PROMPTS_DIR` - Custom prompts directory
-
-## Configuration Reference
-
-All configuration fields are documented inline with comments. Key sections:
-
-- `model` - LLM provider and model settings
-- `stages` - Per-stage processing parameters (ingest, summarize, stage, final, audit)
-- `prompts` - Prompt template directory and format
-- `output` - Output location and file naming
-- `input` - Input file path and encoding
-- `pipeline` - General pipeline behavior
+- Keep secrets out of committed example files. Use `longtext.local.yaml` or environment variables instead.
+- The live runtime writes working artifacts next to the input file in `.longtext/`.
+- Bundled prompt templates ship with the package; you generally do not need to edit `prompts.dir` unless you are testing custom prompts.

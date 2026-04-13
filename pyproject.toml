@@ -12,12 +12,34 @@ authors = [
     {name = "longtext-pipeline Team", email = "team@longtext.example.com"}
 ]
 requires-python = ">=3.10"
+keywords = ["llm", "cli", "summarization", "long-context", "analysis", "openai-compatible"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing",
+    "Topic :: Utilities",
+]
 dependencies = [
     "httpx>=0.24.0",
     "pyyaml>=6.0.1",
     "typer>=0.9.0",
     "prometheus_client>=0.19.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TomSunSoya/longtext-pipeline"
+Repository = "https://github.com/TomSunSoya/longtext-pipeline"
+Issues = "https://github.com/TomSunSoya/longtext-pipeline/issues"
+Changelog = "https://github.com/TomSunSoya/longtext-pipeline/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -30,6 +52,9 @@ dev = [
 
 [project.scripts]
 longtext = "longtext_pipeline.cli:app"
+
+[tool.setuptools.package-data]
+longtext_pipeline = ["prompts/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

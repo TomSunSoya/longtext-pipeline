@@ -1,180 +1,119 @@
 # Contributing to longtext-pipeline
 
-Thank you for your interest in contributing! This document covers everything you need to know about the development process.
+Thanks for contributing. This guide is written for first-time contributors and for maintainers doing release-quality changes.
 
-## Table of Contents
+## Getting started
 
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Code Style](#code-style)
-- [Testing](#testing)
-- [Pull Request Guidelines](#pull-request-guidelines)
-- [Commit Message Format](#commit-message-format)
-
-## Getting Started
-
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally:
-   ```bash
-   git clone https://github.com/your-username/longtext-pipeline
-   cd longtext-pipeline
-   ```
-3. **Create a branch** for your changes:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-## Development Setup
-
-### 1. Create a virtual environment
+1. Fork the repository on GitHub.
+2. Clone your fork:
 
 ```bash
-# macOS/Linux
-python -m venv venv
-source venv/bin/activate
-
-# Windows PowerShell
-python -m venv venv
-.\venv\Scripts\Activate
+git clone https://github.com/TomSunSoya/longtext-pipeline.git
+cd longtext-pipeline
 ```
 
-### 2. Install with dev dependencies
+3. Create a feature branch:
+
+```bash
+git checkout -b feature/your-change
+```
+
+## Development setup
+
+Create a virtual environment:
+
+```bash
+# macOS / Linux
+python -m venv .venv
+source .venv/bin/activate
+
+# Windows PowerShell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Install the project with development dependencies:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-This installs the package in editable mode along with pytest, ruff, mypy, and other development tools.
-
-### 3. Verify installation
+Verify the local setup:
 
 ```bash
-# Check CLI works
 longtext --version
-
-# Run tests to confirm setup
 pytest tests/
-```
-
-## Code Style
-
-We use **ruff** for formatting and linting. Run these before committing:
-
-```bash
-# Format code
-ruff format .
-
-# Check for linting issues
 ruff check .
 ```
 
-### Type hints
+## Local configuration
 
-We use **mypy** for type checking. While not all code is fully typed yet, new code should include type hints where practical:
+Runtime secrets should live in `longtext.local.yaml` or `.longtext.local.yaml`, or in environment variables such as `OPENAI_API_KEY`.
 
-```bash
-# Run type checker
-mypy src/
-```
+Do not commit local provider credentials or machine-specific overrides.
 
-### Python version
+## Quality gates
 
-Minimum Python version is **3.10**. Ensure your code is compatible.
-
-## Testing
-
-### Run all tests
+Run these before opening a pull request:
 
 ```bash
+ruff format .
+ruff check .
+mypy src/longtext_pipeline
 pytest tests/
+python -m pip wheel . -w .tmp/wheel-check --no-deps
 ```
 
-### Run a specific test file
+The wheel build check matters: the project ships prompt templates as package data, so packaging regressions can break installed or containerized runs even when editable installs still work.
+
+## Testing guidance
+
+- Add or update tests for user-visible behavior changes.
+- Prefer focused unit tests for parser, config, and pipeline helpers.
+- Add regression tests for packaging, streaming, resume, or manifest bugs.
+- If a behavior differs between editable installs and packaged installs, test the packaged path explicitly.
+
+Useful commands:
 
 ```bash
-pytest tests/test_splitter.py
+pytest tests/test_streaming.py -q
+pytest tests/test_token_budget.py -q
+pytest tests/test_openai_compatible_regressions.py -q
 ```
 
-### Run a specific test function
+## Documentation expectations
 
-```bash
-pytest tests/test_splitter.py::test_function_name -v
+If behavior, flags, configuration, or operational caveats change, update the relevant docs in the same PR:
+
+- `README.md` for installation, quickstart, and user-facing features
+- `docs/CLI.md` for command semantics
+- `docs/CONFIG.md` for configuration behavior
+- `docs/ARCHITECTURE.md` for structural or operational changes
+- `examples/README.md` when example configs change meaning
+
+## Pull requests
+
+Good PRs are small, explicit, and easy to verify. Please include:
+
+1. A short summary of what changed
+2. Why the change was needed
+3. How you verified it
+4. Any caveats or follow-up work
+
+External pull requests require maintainer review before merge.
+
+## Commit style
+
+Use short imperative commit messages:
+
+```text
+feat: add multi-perspective final analysis
+fix: decode streaming error bodies before handling
+docs: update configuration and packaging guidance
+chore: verify packaged prompt templates in CI
 ```
 
-### Run tests with coverage
+## Security and community
 
-```bash
-pytest --cov=src/longtext_pipeline --cov-report=term-missing tests/
-```
-
-### Test requirements
-
-- All tests must pass before submitting a PR
-- New features should include tests
-- Existing tests should not be broken (check CI results)
-
-## Pull Request Guidelines
-
-### Before submitting
-
-- [ ] Code passes `ruff format` and `ruff check`
-- [ ] All tests pass (`pytest tests/`)
-- [ ] MyPy type checking passes (if applicable)
-- [ ] Changes are documented (update README or docstrings if needed)
-
-### PR description
-
-Include in your PR:
-
-1. **Summary**: What does this change do?
-2. **Motivation**: Why is this change needed?
-3. **Testing**: How was it tested?
-4. **Breaking changes**: Note any backward-incompatible changes
-
-### Review process
-
-- One maintainer approval required for merge
-- CI must pass (tests, linting)
-- Address review feedback promptly
-
-## Commit Message Format
-
-We follow a simple convention:
-
-```
-<type>(<scope>): <subject>
-
-<body>
-```
-
-### Types
-
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Test additions or changes
-- `chore`: Build/config/maintenance tasks
-
-### Examples
-
-```
-feat(pipeline): add multi-perspective analysis mode
-
-Implemented parallel specialist agents for final synthesis stage.
-Configurable via --multi-perspective flag.
-
-fix(splitter): handle edge case with exact chunk boundary
-
-When chunk_size landed exactly on a word boundary, the overlap
-calculation was off by one character.
-
-docs: update installation instructions in README
-
-test(summarize): add tests for concurrent worker failure handling
-```
-
-## Questions?
-
-Open an issue on GitHub if you have questions or need clarification on anything in this guide.
+- For sensitive vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
+- Community participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

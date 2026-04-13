@@ -1,193 +1,136 @@
-# Configuration Specification
+# Configuration Reference
 
-## Overview
+`longtext-pipeline` uses YAML configuration plus environment-variable overrides.
 
-The `longtext-pipeline` uses YAML configuration files to define processing parameters, model settings, and pipeline behavior. Configuration follows a hierarchical approach with environment variable overrides available for key parameters.
+## Resolution order
 
-## File Locations
+Runtime config precedence, from lowest to highest:
 
-Configuration files are typically located in the `examples/` directory:
+1. Built-in defaults
+2. Explicit config passed with `--config`
+3. Auto-discovered local config
+4. Environment variable overrides
 
-- `examples/config.general.yaml` - General text analysis configuration
-- `examples/config.relationship.yaml` - Relationship-focused analysis configuration
-- `longtext.local.yaml` - Machine-local runtime config, auto-loaded on startup and intended for secrets/provider overrides
+Auto-discovered local config filenames:
 
-The dual configuration approach supports the different analysis types as designed in the pipeline architecture, enabling both general text summarization and entity relationship mapping as outlined in the planned prompt templates (summary_general/relationship, stage_general/relationship, etc.).
+- `longtext.local.yaml`
+- `.longtext.local.yaml`
 
-## Configuration Structure
+## Top-level sections
 
-The configuration file uses the following top-level schema:
+Supported sections in the current schema:
 
-```yaml
-model:
-  provider: string          # Model provider (e.g. "openai", "openrouter", "ollama")
-  name: string              # Model name (e.g. "gpt-4o-mini", "gpt-4o")
-  base_url: string          # API endpoint URL (defaults to provider standard)
-  api_key: string           # API key reference (supports environment variable substitution)
-  temperature: number       # Generation temperature (0.0-2.0, default: 0.7)
+- `model`
+- `stages`
+- `prompts`
+- `output`
+- `input`
+- `pipeline`
+- `logging`
+- `agents`
 
-stages:
-  ingest:
-    chunk_size: integer     # Text split size for initial fragments
-    overlap_rate: number    # Overlap ratio between chunks (0.0-1.0)
-    
-  summarize:
-    prompt_template: string # Path to summary prompt template
-    batch_size: integer     # Number of parts processed concurrently
-    
-  stage:
-    group_size: integer     # Number of summaries to combine in a stage
-    prompt_template: string # Path to stage aggregation prompt template
-    
-  final:
-    prompt_template: string # Path to final analysis prompt template
+Unknown keys currently warn rather than fail.
 
-  audit:                    # Optional stage
-    enabled: bool           # Whether to run post-processing audit
-    prompt_template: string # Path to audit prompt template
-
-prompts:
-  dir: string               # Root directory for prompt templates
-  format: string            # Prompt format ("general", "relationship")
-  
-output:
-  dir: string               # Output directory for results
-  naming:
-    summarize_prefix: string # Filename prefix for summary outputs
-    stage_prefix: string     # Filename prefix for stage outputs
-    final_filename: string   # Filename for final output
-  save_intermediate: bool    # Whether to keep intermediate files
-
-input:
-  file_path: string         # Path to input file to process
-  encoding: string          # Text encoding (default: "utf-8")
-
-pipeline:
-  allow_resume: boolean     # Enable resumable processing
-  audit_enabled: boolean    # Enable post-processing audit phase
-  max_workers: integer      # Max concurrent workers for parallel operations
-```
-
-## Default Values
-
-Default configuration values are applied throughout the system, eliminating required fields for MVP usage:
+## Example
 
 ```yaml
 model:
-  provider: "openai"
-  name: "gpt-4o-mini"
-  base_url: null           # Will default to provider-specific base URL
-  api_key: "${OPENAI_API_KEY}"  # Environment variable reference
+  provider: openai
+  name: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
   temperature: 0.7
+  timeout: 120.0
 
 stages:
   ingest:
-    chunk_size: 4000       # Approximately 1000-1500 tokens
+    chunk_size: 4000
     overlap_rate: 0.1
-    
   summarize:
-    prompt_template: "prompts/summary_general.txt"  # Relative to prompts.dir
     batch_size: 4
-    
   stage:
-    group_size: 5          # Combine every 5 summaries into 1 stage file
-    prompt_template: "prompts/stage_general.txt"
-    
-  final:
-    prompt_template: "prompts/final_general.txt"
-
-prompts:
-  dir: "./src/longtext_pipeline/prompts"
-  format: "general"        # Alternative: "relationship"
-  
-output:
-  dir: "./output"
-  naming:
-    summarize_prefix: "summary_"
-    stage_prefix: "stage_"
-    final_filename: "final_analysis.md"
-  save_intermediate: true
-
-input:
-  file_path: null          # Must be provided in final config
-  encoding: "utf-8"
+    group_size: 5
+  audit:
+    enabled: false
 
 pipeline:
   allow_resume: true
-  audit_enabled: false
   max_workers: 4
+  specialist_count: 4
+
+logging:
+  level: INFO
+  format: text
 ```
 
-## Environment Variable Overrides
+## Environment variables
 
-The runtime loader resolves configuration in this order:
+The runtime recognizes these overrides:
 
-1. Built-in defaults
-2. Explicit config passed via `--config`
-3. Auto-discovered `longtext.local.yaml` (or `.longtext.local.yaml`) from the current directory or a parent directory
-4. Environment variable overrides
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `LONGTEXT_MODEL_PROVIDER`
+- `LONGTEXT_MODEL_NAME`
+- `LONGTEXT_OUTPUT_DIR`
+- `LONGTEXT_PROMPTS_DIR`
+- `LONGTEXT_LOG_LEVEL`
+- `LONGTEXT_LOG_FORMAT`
+- `LONGTEXT_LOG_FILE`
 
-This allows you to keep pipeline behavior in `examples/config.general.yaml` while storing local secrets and provider settings in `longtext.local.yaml`.
+## Section notes
 
-The configuration system supports the following environment variables as secure alternatives to specifying values in YAML:
+### `model`
 
-- `OPENAI_API_KEY`: API key for OpenAI service
-- `OPENAI_BASE_URL`: Base URL for OpenAI API (use for proxy/custom endpoint)
-- `LONGTEXT_MODEL_PROVIDER`: Default model provider override
-- `LONGTEXT_MODEL_NAME`: Default model name override
-- `LONGTEXT_OUTPUT_DIR`: Default output directory override
-- `LONGTEXT_PROMPTS_DIR`: Default prompts directory override
+Controls provider, model name, API endpoint, timeout, temperature, and context window.
 
-### Variable Substitution
+### `stages`
 
-Environment variables are referenced in YAML using `"${VARIABLE_NAME}"` syntax:
+Controls stage-specific behavior such as:
 
-```yaml
-model:
-  api_key: "${OPENAI_API_KEY}"           # Substituted at runtime
-  base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"  # With fallback
+- ingest chunk size and overlap
+- summarize batch size
+- stage group size
+- audit enablement
 
-output:
-  dir: "${LONGTEXT_OUTPUT_DIR:-./output}"
-```
+### `prompts`
 
-## Configuration Validation
+Holds prompt-template metadata.
 
-### Unknown Key Handling
+Important:
 
-The configuration system implements a "fail-safe" validation approach:
+- The packaged runtime includes built-in prompt templates under `longtext_pipeline/prompts/`.
+- The current pipeline stages load bundled templates by mode.
+- `prompts.dir` and stage `prompt_template` fields are most useful for advanced overrides, validation, and repository-based development workflows.
 
-- Unknown keys are logged as warnings, not errors
-- Configuration process continues with unknown keys ignored
-- This allows configuration files to maintain backward compatibility
-- Users receive feedback about potentially unused or misspelled keys
+### `output`
 
-### Validation Examples
+The schema includes output-related keys, but the current runtime still writes its working directory next to the input file in `.longtext/`.
 
-Valid extra keys (produce warnings):
-```yaml
-model:
-  provider: "openai"
-  unknown_setting: "ignored"  # Warning logged: "unknown key: unknown_setting"
-  name: "gpt-4o-mini"
-```
+Treat this block as partially implemented metadata rather than a guaranteed output router.
 
-Invalid value types are handled gracefully with fallback to defaults when possible.
+### `pipeline`
 
-## Supported Formats
+Current notable keys:
 
-Configuration supports two primary analysis formats:
+- `allow_resume`
+- `audit_enabled`
+- `max_workers`
+- `specialist_count`
 
-### General Analysis (`format: "general"`)
+### `agents`
 
-Used for general-purpose text summarization and analysis:
-- `prompts/summary_general.txt` - Basic summary generation
-- `prompts/stage_general.txt` - Section combination
-- `prompts/final_general.txt` - Final synthesis
+Lets advanced users override model settings per role, for example:
 
-### Relationship Analysis (`format: "relationship"`)
+- `summarizer`
+- `stage_synthesizer`
+- `analyst`
+- `auditor`
+- `topic_analyst`
+- `entity_analyst`
+- `sentiment_analyst`
+- `timeline_analyst`
 
-Optimized for entity relationships and connection mapping:
-- `prompts/summary_relationship.txt` - Relationships summary
-- `prompts/stage_relationship.txt` - Relationship clustering
-- `prompts/final_relationship.txt` - Final relations analysis
+## Practical guidance
+
+- For normal local use, keep secrets in `longtext.local.yaml` and commit only reusable example configs.
+- If you just want the default prompts, do not change `prompts.dir`.
+- If you distribute a packaged install, verify the wheel includes prompt `.txt` files.

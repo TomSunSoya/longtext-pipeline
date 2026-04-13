@@ -1,33 +1,43 @@
 # longtext-pipeline
 
+[![CI](https://github.com/TomSunSoya/longtext-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/TomSunSoya/longtext-pipeline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A Python CLI tool for hierarchical analysis of super-long texts using LLMs.
 
 **Problem**: Feeding massive documents directly to LLMs causes context overflow, hallucinations, and unauditable outputs.
 
-**Solution**: A 4-stage pipeline that decomposes long texts into manageable chunks, processes them hierarchically, and synthesizes results with built-in traceability.
+**Solution**: A 5-stage pipeline that decomposes long texts into manageable chunks, processes them hierarchically, and synthesizes results with built-in traceability.
 
 ## Features
 
-- **Stratifiable processing**: 4-stage pipeline (Ingest → Summarize → Stage → Final)
-- **Resumable**: Checkpoint-based resume with SHA-256 hash validation
-- **Dual modes**: General analysis and relationship-focused (experimental)
-- **Model-agnostic**: OpenAI-compatible API support (OpenAI, OpenRouter, Ollama, etc.)
-- **Audit trail**: Intermediate files preserved for traceability
+- **Hierarchical processing**: 5-stage pipeline (Ingest → Summarize → Stage → Final → Audit)
+- **Resumable**: SHA-256-based checkpoint/resume — pick up where you left off
+- **Continue-with-Partial**: Pipeline continues with available results when individual parts fail
+- **Token budget management**: Automatic context window validation and prompt truncation
+- **Streaming**: Real-time token streaming with progress callbacks
+- **Cross-process locking**: File-level locking prevents concurrent runs on the same input
+- **Observability**: Prometheus metrics, structured JSON logging, configurable log sinks
+- **Dual modes**: General analysis and relationship-focused analysis
+- **Multi-perspective**: Parallel specialist agents for richer final synthesis
+- **Model-agnostic**: Any OpenAI-compatible API endpoint (OpenAI, OpenRouter, Ollama, vLLM, etc.)
+- **Docker-ready**: Multi-stage Dockerfile with non-root user
 
 ## Prerequisites
 
-- Python 3.9+
+- Python >= 3.10
 - pip
-- OpenAI API key (or compatible endpoint)
+- An OpenAI-compatible API key
 
 ## Installation
 
 ```bash
-# Clone or download the project
+# Clone the repository
+git clone https://github.com/TomSunSoya/longtext-pipeline.git
 cd longtext-pipeline
 
-# Install in editable mode
-pip install -e .
+# Install in editable mode (with dev dependencies)
+pip install -e ".[dev]"
 
 # Verify installation
 longtext --version
@@ -35,51 +45,51 @@ longtext --version
 
 ## Quickstart
 
-### 1. Prepare your input file
-
-Create a text file with content to analyze. For testing, use a sample document:
-
-```text
-# sample_input.txt
-
-Chapter 1: The Beginning
-The project started on January 15th when the team gathered for the kickoff meeting.
-Sarah proposed the new architecture while John raised concerns about timeline...
-
-Chapter 2: Development Phase
-During the sprint, the team encountered several blockers. The database migration
-took longer than expected, but the frontend team made significant progress...
-
-Chapter 3: Results and Conclusions
-The final delivery exceeded expectations. User engagement increased by 40% and
-the system handled 10x the original load capacity...
-```
-
-### 2. Set your API key
+### 1. Set your API key
 
 ```bash
-# Set OpenAI API key (required)
+# Required
 export OPENAI_API_KEY="sk-your-api-key-here"
 
-# Or for Windows PowerShell:
+# Optional: custom endpoint (Ollama, vLLM, etc.)
+export OPENAI_BASE_URL="https://your-endpoint/v1"
+```
+
+On Windows PowerShell:
+```powershell
 $env:OPENAI_API_KEY="sk-your-api-key-here"
 ```
 
-### 3. Run the pipeline
+### 2. Run the pipeline
 
 ```bash
-# Using general analysis mode (default)
-longtext run sample_input.txt --config examples/config.general.yaml
+# Basic usage — analyze a text file
+longtext run input.txt
+
+# With a config file
+longtext run input.txt --config examples/config.general.yaml
+
+# Relationship analysis mode
+longtext run input.txt --mode relationship
+
+# Resume an interrupted run
+longtext run input.txt --resume
+
+# Multi-perspective analysis with 3 specialist agents
+longtext run input.txt --multi-perspective --agent-count 3
+
+# Control concurrency
+longtext run input.txt --max-workers 2
 ```
 
-### 4. Check results
+### 3. Check results
 
 ```bash
-# Check processing status
-longtext status sample_input.txt
+# View processing status
+longtext status input.txt
 
-# View the final analysis
-cat output/final_analysis.md
+# Read the final analysis
+cat .longtext/final_analysis.md
 ```
 
 ## CLI Commands
@@ -88,18 +98,20 @@ cat output/final_analysis.md
 
 Execute the full pipeline on an input file.
 
-```bash
+```
 longtext run <input-file> [OPTIONS]
 
-# Required
-<input-file>              Path to input .txt or .md file
+Arguments:
+  <input-file>                Path to input .txt or .md file
 
-# Options
---config PATH             Path to YAML config file (default: examples/config.general.yaml)
---mode TEXT               Processing mode: "general" or "relationship"
---resume                  Resume from checkpoint if available
---output-dir PATH         Override output directory
---help                    Show all options
+Options:
+  --config, -c PATH           YAML config file
+  --mode, -m TEXT              "general" (default) or "relationship"
+  --resume, -r                Resume from checkpoint
+  --multi-perspective, -mp    Enable parallel specialist agents
+  --agent-count INT           Number of specialist agents (1-4, implies --multi-perspective)
+  --max-workers INT           Max concurrent workers (1-256)
+  --help                      Show all options
 ```
 
 ### `longtext status`
@@ -108,12 +120,6 @@ Check processing status and manifest state.
 
 ```bash
 longtext status <input-file>
-
-# Shows:
-# - Processing stage (pending/in-progress/completed)
-# - Completed parts and summaries
-# - File hash validation
-# - Timestamps for each operation
 ```
 
 ### `longtext init`
@@ -121,192 +127,202 @@ longtext status <input-file>
 Initialize a new project with default configuration.
 
 ```bash
-longtext init [OPTIONS]
-
---output-dir PATH         Output directory to initialize
---copy-config             Copy default config files
+longtext init [--dir PATH]
 ```
 
-## Modes
+## Output Structure
 
-### General Mode (default)
+Processing creates a `.longtext/` directory alongside the input file:
 
-Standard summarization and analysis for most use cases.
-
-```bash
-longtext run document.txt --config examples/config.general.yaml
-# or
-longtext run document.txt --mode general
 ```
-
-**Best for**: Meeting transcripts, project docs, knowledge bases, chat logs.
-
-### Relationship Mode (experimental)
-
-Entity and relationship-focused analysis for network mapping.
-
-```bash
-longtext run transcript.txt --config examples/config.relationship.yaml
-# or
-longtext run transcript.txt --mode relationship
+.longtext/
+├── part_001.txt           # Split input chunks
+├── part_002.txt
+├── summary_001.md         # Per-chunk LLM summaries
+├── summary_002.md
+├── stage_001.md           # Aggregated stage summaries
+├── final_analysis.md      # Final synthesized analysis
+├── manifest.json          # Processing state & checkpoint data
+├── metrics.prom           # Prometheus metrics
+└── .locks/                # Cross-process lock files
 ```
-
-**Best for**: Organizational networks, stakeholder mapping, communication flows.
-
-**Note**: Uses gpt-4o (higher quality) with lower temperature for consistent entity naming.
-
-## Resume Functionality
-
-The pipeline supports resumable processing via `manifest.json` checkpointing.
-
-### How it works
-
-1. After each stage completes, progress is saved to `.longtext/manifest.json`
-2. On interruption, rerun with `--resume` flag
-3. System validates file hashes to detect input changes
-4. Skips completed stages, processes only remaining work
-
-### Example: Resume interrupted run
-
-```bash
-# First run (interrupted at 60%)
-longtext run large_document.txt --config examples/config.general.yaml
-
-# Resume from checkpoint
-longtext run large_document.txt --config examples/config.general.yaml --resume
-
-# System output:
-# "Resuming from checkpoint... 12/20 parts completed"
-# "Skipping completed stages, processing remaining 8 parts..."
-```
-
-### When to use resume
-
-- Network timeouts during LLM calls
-- Power failures or system crashes
-- Manual interruption (Ctrl+C)
-- API rate limit backoff
 
 ## Configuration
 
-Configuration is YAML-based with environment variable overrides.
+Config is YAML-based with layered precedence (highest wins):
+
+**env vars > `longtext.local.yaml` (auto-discovered) > `--config` file > built-in defaults**
 
 ### Key sections
 
 | Section | Purpose | Key settings |
 |---------|---------|--------------|
-| `model` | LLM provider and model | `provider`, `name`, `temperature` |
+| `model` | LLM provider and model | `provider`, `name`, `temperature`, `timeout` |
 | `stages` | Per-stage parameters | `chunk_size`, `group_size`, `batch_size` |
 | `prompts` | Prompt templates | `dir`, `format` |
 | `output` | Output location | `dir`, `naming` conventions |
 | `pipeline` | General behavior | `allow_resume`, `max_workers` |
+| `logging` | Log configuration | `level`, `format` (text/json), `file` |
+
+### Environment variable overrides
+
+```bash
+# Required
+export OPENAI_API_KEY="sk-..."
+
+# Model
+export OPENAI_BASE_URL="https://custom-endpoint.com/v1"
+export LONGTEXT_MODEL_NAME="gpt-4o"
+
+# Output
+export LONGTEXT_OUTPUT_DIR="./my-output"
+
+# Logging
+export LONGTEXT_LOG_LEVEL="DEBUG"
+export LONGTEXT_LOG_FORMAT="json"
+export LONGTEXT_LOG_FILE="./pipeline.log"
+```
 
 ### Example configs
 
-- `examples/config.general.yaml` - General analysis (default)
-- `examples/config.relationship.yaml` - Relationship analysis (experimental)
-- `examples/config.default.yaml` - Default values reference
+| File | Use case |
+|------|----------|
+| `examples/config.default.yaml` | All defaults with documentation |
+| `examples/config.general.yaml` | General analysis |
+| `examples/config.relationship.yaml` | Relationship analysis |
+| `examples/config.multi_agent.yaml` | Multi-perspective analysis |
+| `examples/config.performance_test.yaml` | Performance tuning |
 
-### Environment overrides
+### Local overrides
+
+Create `longtext.local.yaml` in the working directory for secrets and local provider settings. This file is auto-discovered and should not be committed.
+
+### Current limitation
+
+The runtime currently writes working files next to the input file in `.longtext/`. The `output` section remains in the config schema, but it is not yet enforced uniformly by every stage.
+
+## Modes
+
+### General Mode (default)
+
+Standard summarization and analysis. Best for meeting transcripts, project docs, knowledge bases, chat logs.
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export OPENAI_BASE_URL="https://custom-endpoint.com/v1"
-export LONGTEXT_MODEL_NAME="gpt-4o"
-export LONGTEXT_OUTPUT_DIR="./my-output"
+longtext run document.txt --mode general
+```
+
+### Relationship Mode
+
+Entity and relationship-focused analysis for network mapping. Best for organizational networks, stakeholder mapping, communication flows.
+
+```bash
+longtext run transcript.txt --mode relationship
+```
+
+Relationship mode is available today, but some prompt sets and warnings still treat it as experimental.
+
+## Resume
+
+The pipeline supports checkpoint-based resumable processing via SHA-256 hash validation.
+
+### How it works
+
+1. Progress is saved to `.longtext/manifest.json` after each stage
+2. On interruption, rerun with `--resume`
+3. Input file hash is validated to detect changes
+4. Completed stages are skipped; only remaining work is processed
+
+```bash
+# First run (interrupted)
+longtext run large_document.txt
+
+# Resume from checkpoint
+longtext run large_document.txt --resume
+```
+
+### When resume helps
+
+- Network timeouts during LLM calls
+- API rate limit backoff
+- Manual interruption (Ctrl+C)
+- System crashes
+
+## Docker
+
+### Build and run
+
+```bash
+# Build the image
+docker build -t longtext-pipeline .
+
+# Run
+docker run \
+  -e OPENAI_API_KEY="your-key" \
+  -v ./input:/data:ro \
+  -v ./output:/output \
+  longtext-pipeline run /data/input.txt
+```
+
+### Docker Compose
+
+```bash
+# Place input files in ./input/
+# Set OPENAI_API_KEY in .env or environment
+docker compose run longtext run /data/input.txt
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────┐
 │                          CLI Layer                           │
-│                     (cli.py entry point)                     │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
+│                  (Typer-based entry point)                   │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
 │                       Config Layer                           │
-│                  (validation, merging)                       │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
-│  │ Ingest  │→ │Summarize│→ │  Stage  │→ │  Final  │        │
-│  │  split  │  │  parts  │  │aggregate│  │synthesize│       │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        │
-│       │            │            │            │              │
-│       └────────────┴────────────┴────────────┘              │
-│                         │                                   │
-│                         ▼                                   │
-│                  ┌──────────┐                               │
-│                  │ Manifest │ ← State tracking & resume     │
-│                  └──────────┘                               │
-│                         │                                   │
-│                         ▼                                   │
-│                  ┌──────────┐                               │
-│                  │   LLM    │ ← OpenAI-compatible clients   │
-│                  └──────────┘                               │
-└─────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Output Files                            │
-│   parts/ → summaries/ → stages/ → final_analysis.md         │
-└─────────────────────────────────────────────────────────────┘
+│          (YAML loading, env vars, validation)                │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Pipeline Orchestrator                      │
+│         (sequential stages, continue-with-partial)           │
+│                                                              │
+│  ┌────────┐  ┌─────────┐  ┌───────┐  ┌───────┐  ┌───────┐  │
+│  │ Ingest │→ │Summarize│→ │ Stage │→ │ Final │→ │ Audit │  │
+│  │ split  │  │  async  │  │ async │  │ async │  │ check │  │
+│  └────────┘  └─────────┘  └───────┘  └───────┘  └───────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ Manifest (SHA-256 state tracking & resume)           │    │
+│  ├──────────────────────────────────────────────────────┤    │
+│  │ Token Budget Manager (context window validation)     │    │
+│  ├──────────────────────────────────────────────────────┤    │
+│  │ File Lock (cross-process mutex)                      │    │
+│  ├──────────────────────────────────────────────────────┤    │
+│  │ Prometheus Metrics (retry, latency, rate limits)     │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                          │                                   │
+│                          ▼                                   │
+│                 ┌─────────────────┐                          │
+│                 │   LLM Client    │                          │
+│                 │ (OpenAI-compat) │                          │
+│                 │ sync/async/SSE  │                          │
+│                 └─────────────────┘                          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Data flow
 
-1. **CLI** parses arguments and loads config
-2. **Ingest** reads input, splits into chunks (4000 chars, 10% overlap)
-3. **Summarize** generates summaries for each chunk via LLM
-4. **Stage** aggregates 5 summaries into stage summaries
-5. **Final** synthesizes all stage summaries into final analysis
-6. **Manifest** tracks state throughout for resume capability
-
-## Output Structure
-
-After processing completes, the output directory contains:
-
-```
-output/
-├── manifest.json          # State tracking, hashes, timestamps
-├── status.log            # Processing log
-├── parts/
-│   ├── part_001.txt      # Split input chunks
-│   ├── part_002.txt
-│   └── ...
-├── summaries/
-│   ├── summary_001.md    # Per-chunk summaries
-│   ├── summary_002.md
-│   └── ...
-├── stages/
-│   ├── stage_001.md      # Aggregated stage summaries
-│   └── ...
-└── final/
-    └── final_analysis.md # Final synthesized analysis (deliverable)
-```
-
-### manifest.json
-
-The manifest file contains:
-
-```json
-{
-  "input_hash": "sha256:abc123...",
-  "stages": {
-    "ingest": { "status": "completed", "timestamp": "..." },
-    "summarize": { "status": "completed", "parts": [
-      { "id": "part_001", "status": "completed", "hash": "..." },
-      { "id": "part_002", "status": "completed", "hash": "..." }
-    ]},
-    "stage": { "status": "completed" },
-    "final": { "status": "completed" }
-  }
-}
-```
+1. **CLI** parses arguments and loads layered config
+2. **Ingest** reads input, splits into chunks (4000 chars, 10% overlap by default)
+3. **Summarize** generates summaries for each chunk via LLM (async, concurrent workers)
+4. **Stage** groups summaries (default 5 per group) and synthesizes (async)
+5. **Final** synthesizes all stage summaries into one analysis (async, optional multi-perspective)
+6. **Audit** post-processing quality check (placeholder in v1)
+7. **Manifest** tracks state throughout for resume capability
 
 ## Troubleshooting
 
@@ -316,84 +332,84 @@ The manifest file contains:
 # Verify API key is set
 echo $OPENAI_API_KEY
 
-# Check key format (should start with "sk-")
-export OPENAI_API_KEY="sk-..."
+# Check endpoint is reachable
+curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" | head -1
 ```
 
 ### Resume not working
 
 ```bash
 # Check manifest exists
-ls -la output/manifest.json
+cat .longtext/manifest.json | python -m json.tool
 
-# Verify input file hasn't changed (hash mismatch breaks resume)
-# If input changed, remove manifest and restart fresh
-rm output/manifest.json
+# If input file changed, hash mismatch will prevent resume
+# Remove manifest and restart:
+rm .longtext/manifest.json
 ```
 
-### Out of memory errors
+### "Another pipeline process is already running"
+
+The file lock prevents concurrent runs on the same input. If a previous run crashed without releasing the lock:
+
+```bash
+# Remove stale lock file
+rm .longtext/.locks/*.lock
+```
+
+### Rate limits or timeouts
 
 ```yaml
-# Reduce batch_size in config
+# Reduce concurrency in config
+pipeline:
+  max_workers: 2     # Default is 4
+
 stages:
   summarize:
-    batch_size: 2  # Default is 4
-  ingest:
-    chunk_size: 3000  # Default is 4000
+    batch_size: 2    # Default is 4
+
+model:
+  timeout: 120       # Seconds (max 600)
 ```
 
-### LLM rate limits
+### Context window exceeded
+
+The token budget manager validates prompts before sending. If you see `ContextWindowExceededError`:
 
 ```yaml
-# Reduce concurrent workers
-pipeline:
-  max_workers: 2  # Default is 4
-
-# Add delays between API calls (custom implementation may be needed)
+# Reduce chunk size so individual prompts are smaller
+stages:
+  ingest:
+    chunk_size: 3000   # Default is 4000
 ```
-
-### Empty or tiny input warnings
-
-The system handles small inputs gracefully:
-
-- Files < 1000 chars: Processed as single chunk with adjusted prompts
-- Empty files: Warning logged, placeholder created
 
 ### Encoding errors
 
 ```yaml
-# Specify encoding for non-UTF-8 files
 input:
-  encoding: "latin-1"  # or cp1252, utf-16, etc.
+  encoding: "latin-1"   # Default is utf-8
 ```
 
 ## Contributing
 
-See comprehensive documentation in `docs/`:
-
-- `docs/SPEC.md` - MVP specification and feature requirements
-- `docs/ARCHITECTURE.md` - Detailed module architecture and interfaces
-- `docs/development/` - Development workflow and testing guidelines
-
-### Quick contribution guide
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, testing, and PR guidelines.
 
 ```bash
-# Fork and clone
-git clone https://github.com/your-username/longtext-pipeline
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-
-# Install dev dependencies
+# Quick start
 pip install -e ".[dev]"
-
-# Run tests
 pytest tests/
-
-# Submit PR
+ruff check .
 ```
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [CLI reference](docs/CLI.md)
+- [Configuration reference](docs/CONFIG.md)
+- [Architecture overview](docs/ARCHITECTURE.md)
+- [Examples guide](examples/README.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## License
 
-MIT License - see LICENSE file in the project root.
+MIT License - see [LICENSE](LICENSE) for details.

@@ -16,6 +16,7 @@ AUTO_CONFIG_FILENAMES = (
     "longtext.local.yaml",
     ".longtext.local.yaml",
 )
+DEFAULT_PROMPTS_DIR = str((Path(__file__).resolve().parent / "prompts").resolve())
 
 
 class ConfigError(Exception):
@@ -55,7 +56,7 @@ DEFAULT_CONFIG = {
         },
     },
     "prompts": {
-        "dir": "./src/longtext_pipeline/prompts",
+        "dir": DEFAULT_PROMPTS_DIR,
         "format": "general",  # Alternative: "relationship"
     },
     "output": {
@@ -372,9 +373,7 @@ def validate_config(config: dict) -> bool:
                     )
                 # If audit.enabled=true, check prompt_template file exists
                 elif audit.get("enabled") is True:
-                    prompts_dir = config.get("prompts", {}).get(
-                        "dir", "./src/longtext_pipeline/prompts"
-                    )
+                    prompts_dir = config.get("prompts", {}).get("dir", DEFAULT_PROMPTS_DIR)
                     # Extract just the filename from prompt_template (e.g., "prompts/audit_general.txt" → "audit_general.txt")
                     template_filename = Path(prompt_template).name
                     template_path = Path(prompts_dir) / template_filename

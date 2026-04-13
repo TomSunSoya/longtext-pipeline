@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/TomSunSoya/longtext-pipeline/blob/master/SECURITY.md
+    about: Please follow the private reporting guidance for sensitive vulnerabilities.
+  - name: Documentation
+    url: https://github.com/TomSunSoya/longtext-pipeline/blob/master/docs/README.md
+    about: Start here for CLI, configuration, architecture, and examples.

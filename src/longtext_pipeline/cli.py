@@ -13,6 +13,7 @@ import typer
 import yaml  # type: ignore[import-untyped]
 from typing_extensions import Annotated
 
+from longtext_pipeline import __version__
 from longtext_pipeline.config import (
     AUTO_CONFIG_FILENAMES,
     DEFAULT_CONFIG,
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 def version_callback(value: bool) -> None:
     """Callback for --version flag to display version information."""
     if value:
-        typer.echo("longtext-pipeline v0.1.0")
+        typer.echo(f"longtext-pipeline v{__version__}")
         raise typer.Exit()
 
 
@@ -106,8 +107,8 @@ def run(
 ) -> int:
     """Run the hierarchical analysis pipeline on a text file.
 
-    This is the main command that orchestrates the four-stage processing flow:
-    Ingest → Summarize → Stage → Final
+    This is the main command that orchestrates the five-stage processing flow:
+    Ingest → Summarize → Stage → Final → Audit
 
     Args:
         input_file: Path to the input text file (.txt or .md) to be analyzed.
@@ -471,11 +472,12 @@ def main(
 ) -> None:
     """longtext-pipeline - Hierarchical analysis of super-long texts.
 
-    This tool processes long-text documents through a 4-stage pipeline:
+    This tool processes long-text documents through a 5-stage pipeline:
     1. Ingest - Read and split input
     2. Summarize - Generate part summaries
     3. Stage - Aggregate summaries
     4. Final - Create final analysis
+    5. Audit - Optional post-processing quality check
     """
     pass
 
@@ -648,7 +650,7 @@ To run with a specific configuration:
 longtext run your_text_file.txt --config config.general.yaml
 ```
 
-To analyze using relationship-focused mode (experimental):
+To analyze using relationship-focused mode:
 ```bash
 longtext run your_text_file.txt --mode relationship
 ```
@@ -667,12 +669,13 @@ longtext status your_text_file.txt
 
 ## Output Overview
 
-After running, look in the output directory (`./output` by default) for:
+After running, look in the adjacent `.longtext/` working directory for:
 - Part files: Individual chunk analysis (`part_*.txt`)
-- Summary files: Intermediate summaries (`summary_*.md`) 
+- Summary files: Intermediate summaries (`summary_*.md`)
 - Stage files: Aggregated sections (`stage_*.md`)
 - Final file: Complete analysis (`final_analysis.md`)
 - Manifest: Progress tracking and state (`manifest.json`)
+- Metrics: Prometheus export (`metrics.prom`)
 
 ## Troubleshooting
 

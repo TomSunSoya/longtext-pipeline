@@ -1,5 +1,7 @@
 # longtext-pipeline MVP Spec
 
+> Historical planning document. For the current runtime behavior, prefer the repository `README.md` and the reference docs under `docs/`.
+
 ## 1. Project Overview
 
 `longtext-pipeline` is a hierarchical analysis pipeline for ultra-large texts, positioned as a **Python CLI project**. Rather than "one-time feeding of large text to large models," this project decomposes long text processing into multiple levels where models handle only what they are better suited for at each scale, thus improving overall analysis quality, controllability, and audibility.
@@ -33,7 +35,7 @@ The whole system emphasizes:
 
 ### Core Features:
 - Support `.txt` and `.md` input formats
-- 4-stage processing pipeline: Ingest → Summarize → Stage → Final
+- Original MVP targeted a 4-stage processing pipeline: Ingest → Summarize → Stage → Final
 - YAML-based configuration system (`config.general.yaml`)
 - OpenAI-compatible LLM interface
 - Manifest-based tracking with file hash validation
@@ -156,7 +158,7 @@ These fundamental limitations define the MVP's scope and operational parameters:
 
 ### Architectural Constraints:
 - **Non-Distributed**: Designed as single machine application, no distributed processing
-- **Linear Pipeline**: Fixed 4-stage processing path with no branching variations
+- **Linear Pipeline**: Original MVP focused on the first 4 stages before the later audit extension
 - **Model Agnostic**: Must work with minimal configuration for OpenAI-compatible endpoints
 - **Atomic Operations**: Each stage must complete entirely or roll back to avoid partial states
 - **No External Storage**: All state maintained locally in working directory

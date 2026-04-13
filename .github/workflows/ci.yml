@@ -5,6 +5,10 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -20,16 +24,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-
-      - name: Run type check with basedpyright
-        run: |
-          pip install basedpyright
-          basedpyright src/longtext_pipeline
 
       - name: Run tests with pytest
         run: |
@@ -52,16 +52,68 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
 
-      - name: Install linting tools
+      - name: Install quality tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install -e ".[dev]"
 
       - name: Run Ruff linter
         run: |
-          ruff check src/ tests/
+          ruff check .
 
       - name: Run Ruff formatter check
         run: |
-          ruff format --check src/ tests/
+          ruff format --check .
+
+      - name: Run mypy
+        run: |
+          mypy src/longtext_pipeline
+
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Build distribution artifacts
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Verify packaged prompt templates
+        run: |
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          wheels = sorted(Path("dist").glob("*.whl"))
+          if not wheels:
+              raise SystemExit("No wheel built")
+
+          required = [
+              "longtext_pipeline/prompts/summary_general.txt",
+              "longtext_pipeline/prompts/summary_relationship.txt",
+              "longtext_pipeline/prompts/stage_general.txt",
+              "longtext_pipeline/prompts/stage_relationship.txt",
+              "longtext_pipeline/prompts/final_general.txt",
+              "longtext_pipeline/prompts/final_relationship.txt",
+              "longtext_pipeline/prompts/audit_general.txt",
+              "longtext_pipeline/prompts/audit_relationship.txt",
+          ]
+
+          with zipfile.ZipFile(wheels[-1]) as wheel:
+              names = set(wheel.namelist())
+              missing = [name for name in required if name not in names]
+              if missing:
+                  raise SystemExit(
+                      "Missing packaged prompt templates: " + ", ".join(missing)
+                  )
+          PY

@@ -37,6 +37,8 @@ ENV/
 .coverage
 htmlcov/
 .tox/
+.nox/
+.ruff_cache/
 
 # Build artifacts
 *.log
@@ -51,6 +53,7 @@ htmlcov/
 
 # Project output directory
 output/
+input/
 
 # Environment variables (may contain secrets)
 .env

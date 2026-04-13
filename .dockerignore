@@ -32,9 +32,21 @@ htmlcov/
 
 # Project specific
 .sisyphus/
+.claude/
+.longtext/
+.verify/
+.tmp/
+.longtext.local.yaml
 .env
 longtext.local.yaml
 *.log
+input/
+output/
+temp_*.txt
+tmp_*.txt
+test_input*.txt
+test_multi_agent_verification.py
+bench_*.py
 
 # Documentation (optional - uncomment if you don't want to include in image)
 # docs/

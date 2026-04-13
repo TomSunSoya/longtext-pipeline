@@ -10,7 +10,7 @@ import os
 import sys
 import time
 import warnings
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 
 import httpx
 
@@ -630,7 +630,7 @@ class OpenAICompatibleClient(LLMClient):
         async def async_call():
             return await self.complete_stream(prompt, system_prompt, on_chunk)
 
-        return asyncio.run(async_call())
+        return cast(str, asyncio.run(async_call()))
 
     default_progress_callback = staticmethod(shared_default_progress_callback)
 

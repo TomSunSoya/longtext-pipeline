@@ -118,10 +118,10 @@ class TokenBudgetManager:
     def process_prompt_with_budget(
         self,
         prompt: str,
-        system_prompt: str,
+        system_prompt: Optional[str],
         context_window: int,
         max_output_tokens: Optional[int] = None,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, Optional[str]]:
         """
         Process a prompt pair with respect to token budget.
 

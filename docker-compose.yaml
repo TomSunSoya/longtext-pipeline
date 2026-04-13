@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   longtext:
     build:
@@ -10,11 +8,11 @@ services:
       - ./input:/data:ro
       - ./output:/output
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - LONGTEXT_MODEL_NAME=${LONGTEXT_MODEL_NAME:-gpt-4o}
       - LONGTEXT_OUTPUT_DIR=/output
-    restart: unless-stopped
     command: --help

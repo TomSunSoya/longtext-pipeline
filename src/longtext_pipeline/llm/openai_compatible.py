@@ -4,11 +4,13 @@ This module provides an httpx-based client for OpenAI-compatible APIs.
 Supports custom endpoints via OPENAI_BASE_URL for local models, proxies, etc.
 """
 
+import asyncio
 import json
 import os
-import asyncio
+import sys
 import time
-from typing import Optional, Callable
+import warnings
+from typing import Callable, Optional
 
 import httpx
 
@@ -21,9 +23,15 @@ from ..errors import (
     LLMCommunicationError,
     LLMResponseError,
 )
-from ..utils.token_budget import TokenBudgetManager, ContextWindowExceededError
+from ..utils.token_budget import TokenBudgetManager
 from ..utils.retry import retry_llm_call, retry_llm_call_async
 from .base import LLMClient
+from .progress import (
+    default_progress_callback as shared_default_progress_callback,
+    print_final_streaming_stats as shared_print_final_streaming_stats,
+)
+
+print_final_streaming_stats = shared_print_final_streaming_stats
 
 
 class OpenAICompatibleClient(LLMClient):
@@ -153,7 +161,7 @@ class OpenAICompatibleClient(LLMClient):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-    ) -> tuple:
+    ) -> tuple[str, Optional[str]]:
         """Process prompts with token budget validation before API call.
 
         Args:
@@ -166,41 +174,30 @@ class OpenAICompatibleClient(LLMClient):
         Raises:
             ContextWindowExceededError: If content exceeds context
         """
-        try:
-            processed_prompt, processed_system_prompt = (
-                self._token_budget_manager.process_prompt_with_budget(
-                    prompt=prompt,
-                    system_prompt=system_prompt or "",
-                    context_window=self.context_window,
-                )
+        processed_prompt, processed_system_prompt = (
+            self._token_budget_manager.process_prompt_with_budget(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                context_window=self.context_window,
+            )
+        )
+
+        # Issue warning if content was modified during validation
+        if prompt != processed_prompt or system_prompt != processed_system_prompt:
+            original_tokens = self._token_budget_manager.estimate_tokens(
+                (system_prompt or "") + "\n" + prompt
+            )
+            processed_tokens = self._token_budget_manager.estimate_tokens(
+                (processed_system_prompt or "") + "\n" + processed_prompt
             )
 
-            # Issue warning if content was modified during validation
-            if prompt != processed_prompt or system_prompt != processed_system_prompt:
-                # Calculate tokens to show user
-                original_tokens = self._token_budget_manager.estimate_tokens(
-                    (system_prompt or "") + "\n" + prompt
-                )
-                processed_tokens = self._token_budget_manager.estimate_tokens(
-                    (processed_system_prompt or "") + "\n" + processed_prompt
-                )
+            warnings.warn(
+                f"Content was truncated to fit context window - was {original_tokens} "
+                f"tokens and truncated to {processed_tokens} tokens due to "
+                f"context window limit of {self.context_window} tokens."
+            )
 
-                import warnings
-
-                warnings.warn(
-                    f"Content was truncated to fit context window - was {original_tokens} "
-                    f"tokens and truncated to {processed_tokens} tokens due to "
-                    f"context window limit of {self.context_window} tokens."
-                )
-
-            return processed_prompt, processed_system_prompt
-
-        except ContextWindowExceededError:
-            # Context window exceeded error - raise as is
-            raise
-        except Exception:
-            # For any other exception that occurs during budget processing
-            raise
+        return processed_prompt, processed_system_prompt
 
     def _handle_error(self, status_code: int, response_text: str) -> None:
         """Handle HTTP error responses.
@@ -549,7 +546,11 @@ class OpenAICompatibleClient(LLMClient):
                     json=payload,
                 ) as response:
                     if response.status_code != 200:
-                        self._handle_error(response.status_code, await response.aread())
+                        error_body = await response.aread()
+                        self._handle_error(
+                            response.status_code,
+                            error_body.decode("utf-8", errors="replace"),
+                        )
 
                     # Process the streamed response
                     async for line in response.aiter_lines():
@@ -581,8 +582,6 @@ class OpenAICompatibleClient(LLMClient):
                                             on_chunk(content, tokens_count, elapsed)
 
                                         # Flush to ensure prompt appears immediately as content streams
-                                        import sys
-
                                         sys.stdout.flush()
 
                             except json.JSONDecodeError:
@@ -633,30 +632,7 @@ class OpenAICompatibleClient(LLMClient):
 
         return asyncio.run(async_call())
 
-    @staticmethod
-    def default_progress_callback(
-        token: str, tokens_so_far: int, elapsed: float
-    ) -> None:
-        """Static method that displays real-time progress during streaming.
-
-        Args:
-            token: Current streaming token
-            tokens_so_far: Total number of tokens received
-            elapsed: Time elapsed since streaming started
-        """
-        # Format the count with commas like "1,234 tokens..."
-        formatted_count = f"{tokens_so_far:,}"
-        progress_text = f"\rProcessing: {formatted_count} tokens... "
-
-        # Add estimated speed if we have reasonable timing
-        if elapsed > 0.1:
-            tokens_per_sec = tokens_so_far / elapsed
-            progress_text += f"({tokens_per_sec:.1f} tokens/sec)"
-
-        import sys
-
-        sys.stdout.write(progress_text)
-        sys.stdout.flush()
+    default_progress_callback = staticmethod(shared_default_progress_callback)
 
     @retry_llm_call_async(max_retries=3, backoff_factor=2.0)
     async def _async_complete_json(
@@ -740,19 +716,3 @@ class OpenAICompatibleClient(LLMClient):
             LLMResponseError: If response cannot be parsed as valid JSON
         """
         return await self._async_complete_json(prompt, system_prompt)  # type: ignore[no-any-return]
-
-
-def print_final_streaming_stats(elapsed: float, tokens_count: int) -> None:
-    """Print final statistics for streamed content.
-
-    Args:
-        elapsed: Total time elapsed for streaming
-        tokens_count: Total number of tokens received
-    """
-    if elapsed > 0:
-        avg_tokens_per_sec = tokens_count / elapsed if elapsed > 0 else 0
-        print(
-            f"\nCompleted in {elapsed:.2f}s at ~{avg_tokens_per_sec:.1f} tokens/sec ({tokens_count:,} tokens total)"
-        )
-    else:
-        print(f"\nCompleted ({tokens_count:,} tokens)")

@@ -15,6 +15,7 @@ import time
 
 from ..errors import LLMError, StageFailedError
 from ..llm.factory import get_llm_client
+from ..llm.progress import print_final_streaming_stats
 from ..manifest import ManifestManager
 from ..models import Manifest, Part, Summary
 from ..utils.io import read_file, write_file
@@ -107,14 +108,11 @@ class SummarizeStage:
 
             response = await client.complete_stream(
                 full_prompt,
-                on_chunk=lambda token, tokens_so_far, elapsed: (
-                    client.default_progress_callback(token, tokens_so_far, elapsed)
-                ),
+                on_chunk=client.default_progress_callback,
             )
 
             # Count tokens roughly - this won't be precise
             total_tokens_estimate = len(response.split()) if response else 0
-            from ..llm.openai_compatible import print_final_streaming_stats
 
             print_final_streaming_stats(time.time() - start_time, total_tokens_estimate)
         else:

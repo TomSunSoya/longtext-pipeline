@@ -51,14 +51,29 @@ longtext --version
 # Required
 export OPENAI_API_KEY="sk-your-api-key-here"
 
-# Optional: custom endpoint (Ollama, vLLM, etc.)
+# Optional: custom endpoint (Ollama, vLLM, DeepSeek, etc.)
 export OPENAI_BASE_URL="https://your-endpoint/v1"
+
+# Required if using non-OpenAI endpoints
+export LONGTEXT_MODEL_NAME="your-model-name"
 ```
 
 On Windows PowerShell:
 ```powershell
 $env:OPENAI_API_KEY="sk-your-api-key-here"
+$env:OPENAI_BASE_URL="https://your-endpoint/v1"
+$env:LONGTEXT_MODEL_NAME="your-model-name"
 ```
+
+**Note**: The default model is `gpt-4o-mini`. If you use a non-OpenAI provider (e.g., DeepSeek, Ollama), you must set `LONGTEXT_MODEL_NAME` to a model supported by your provider.
+
+**Common providers**:
+| Provider | OPENAI_BASE_URL | LONGTEXT_MODEL_NAME |
+|----------|-----------------|---------------------|
+| OpenAI | (default) | `gpt-4o-mini` (default) |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| Ollama | `http://localhost:11434/v1` | Your local model name |
+| OpenRouter | `https://openrouter.ai/api/v1` | Provider-specific |
 
 ### 2. Run the pipeline
 

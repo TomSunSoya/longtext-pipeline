@@ -66,15 +66,24 @@ logging:
 
 The runtime recognizes these overrides:
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `LONGTEXT_MODEL_PROVIDER`
-- `LONGTEXT_MODEL_NAME`
-- `LONGTEXT_OUTPUT_DIR`
-- `LONGTEXT_PROMPTS_DIR`
-- `LONGTEXT_LOG_LEVEL`
-- `LONGTEXT_LOG_FORMAT`
-- `LONGTEXT_LOG_FILE`
+- `OPENAI_API_KEY` — API key for authentication
+- `OPENAI_BASE_URL` — Custom API endpoint (for non-OpenAI providers)
+- `LONGTEXT_MODEL_NAME` — Model name (required if using non-OpenAI providers)
+- `LONGTEXT_MODEL_PROVIDER` — Provider identifier
+- `LONGTEXT_OUTPUT_DIR` — Output directory
+- `LONGTEXT_PROMPTS_DIR` — Custom prompts directory
+- `LONGTEXT_LOG_LEVEL` — Log verbosity
+- `LONGTEXT_LOG_FORMAT` — Log format (`text` or `json`)
+- `LONGTEXT_LOG_FILE` — Log file path
+
+**Important**: The default model is `gpt-4o-mini`. If you set `OPENAI_BASE_URL` to a non-OpenAI endpoint (e.g., DeepSeek, Ollama), you must also set `LONGTEXT_MODEL_NAME` to a model supported by that provider.
+
+**Example for DeepSeek**:
+```bash
+export OPENAI_API_KEY="your-deepseek-api-key"
+export OPENAI_BASE_URL="https://api.deepseek.com"
+export LONGTEXT_MODEL_NAME="deepseek-chat"
+```
 
 ## Section notes
 

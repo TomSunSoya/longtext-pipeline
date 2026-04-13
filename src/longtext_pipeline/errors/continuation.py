@@ -29,8 +29,8 @@ class PartialResult:
     success: bool
     data: Any
     errors: List[str]
-    warnings: List[str] = None
-    metadata: dict = None
+    warnings: List[str] = None  # type: ignore[assignment]
+    metadata: dict = None  # type: ignore[assignment]
 
     def __post_init__(self):
         if self.warnings is None:

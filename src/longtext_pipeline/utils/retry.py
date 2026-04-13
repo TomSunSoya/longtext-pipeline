@@ -37,6 +37,7 @@ class RetryError(PipelineError):
 
 
 T = TypeVar("T")
+CoroutineT = TypeVar("CoroutineT")
 
 
 def retry_llm_call(
@@ -170,8 +171,9 @@ def retry_llm_call(
 
     # Support both @retry_llm_call and @retry_llm_call(...) usage
     if func is not None:
-        return decorator(func)
-    return decorator
+        result = decorator(func)
+        return result  # type: ignore[return-value]
+    return decorator  # type: ignore[return-value]
 
 
 def _make_async_retry_decorator():
@@ -223,7 +225,8 @@ def _make_async_retry_decorator():
 
                 for attempt in range(max_retries + 1):  # +1 for initial attempt
                     try:
-                        return await f(*args, **kwargs)
+                        result: T = await f(*args, **kwargs)  # type: ignore[misc]
+                        return result
 
                     except LLMAuthenticationError:
                         # Auth errors (401) - fail fast, no retry
@@ -308,12 +311,13 @@ def _make_async_retry_decorator():
                     )
                 raise RetryError(f"LLM call failed after {max_retries + 1} attempts")
 
-            return wrapper
+            return wrapper  # type: ignore[misc, return-value]
 
         # Support both @retry_llm_call_async and @retry_llm_call_async(...) usage
+        result_async: Callable[[Callable[..., T]], Callable[..., T]] = decorator
         if func is not None:
-            return decorator(func)
-        return decorator
+            result_async = decorator(func)  # type: ignore[assignment]
+        return result_async  # type: ignore[return-value]
 
     return retry_llm_call_async
 

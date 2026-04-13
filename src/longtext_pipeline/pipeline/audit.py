@@ -11,7 +11,7 @@ result to maintain the 5-stage pipeline pattern.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..models import Manifest
 from ..manifest import ManifestManager
@@ -36,7 +36,7 @@ class AuditStage:
     - Quality scoring and reporting
     """
 
-    def __init__(self, manifest_manager: ManifestManager = None):
+    def __init__(self, manifest_manager: Optional[ManifestManager] = None):
         """Initialize the audit stage.
 
         Args:

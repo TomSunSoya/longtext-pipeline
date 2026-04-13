@@ -5,7 +5,7 @@ and handling throughout the pipeline. The hierarchy supports the
 Continue-with-Partial strategy for robustness.
 """
 
-from typing import Any, List
+from typing import Any, Optional, List
 
 from .continuation import ErrorAggregator, PartialResult
 
@@ -70,6 +70,30 @@ class LLMResponseError(LLMError):
     pass
 
 
+class ContextWindowExceededError(LLMError):
+    """Raised when the required tokens exceed the model's context window,
+    even taking into account the reservation for output.
+
+    This error is raised when it's simply impossible to fit the required content
+    within the context window, even considering reserved tokens for model response,
+    buffer space, and other overhead.
+    """
+
+    def __init__(
+        self, context_window: int, required_tokens: int, message: Optional[str] = None
+    ):
+        self.context_window = context_window
+        self.required_tokens = required_tokens
+
+        if message is None:
+            message = (
+                f"Required {required_tokens} tokens exceed context "
+                f"window of {context_window} tokens."
+            )
+
+        super().__init__(message)
+
+
 class ManifestError(PipelineError):
     """Raised when there is an error reading or writing the manifest."""
 
@@ -117,6 +141,7 @@ __all__ = [
     "LLMContentFilterError",
     "LLMCommunicationError",
     "LLMResponseError",
+    "ContextWindowExceededError",  # Added for token context management
     "ManifestError",
     "PipelineLockError",
     "StageFailedError",

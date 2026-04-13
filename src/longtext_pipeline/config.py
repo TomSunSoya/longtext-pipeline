@@ -9,8 +9,7 @@ import re
 import warnings
 from pathlib import Path
 from typing import Any, Optional
-
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 AUTO_CONFIG_FILENAMES = (
@@ -32,6 +31,7 @@ DEFAULT_CONFIG = {
         "api_key": None,  # Will be overridden by env var
         "temperature": 0.7,
         "timeout": 120.0,
+        "context_window": 128000,  # For GLM-5 model as default
     },
     "stages": {
         "ingest": {
@@ -127,7 +127,8 @@ def load_config(path: Optional[str] = None) -> dict:
           Callers should call merge_env_overrides() after loading.
     """
     if path is None:
-        return _deep_copy(DEFAULT_CONFIG)
+        result = _deep_copy(DEFAULT_CONFIG)
+        return result  # type: ignore[return-value,no-any-return]
 
     loaded = _load_yaml_file(path)
     # Merge loaded config with defaults (loaded takes precedence)
@@ -254,6 +255,7 @@ def validate_config(config: dict) -> bool:
         "api_key",
         "temperature",
         "timeout",
+        "context_window",
     }
     known_ingest_keys = {"chunk_size", "overlap_rate"}
     known_summarize_keys = {"prompt_template", "batch_size"}
@@ -283,25 +285,41 @@ def validate_config(config: dict) -> bool:
             if key not in known_model_keys:
                 warnings.warn(f"Unknown configuration key in model: '{key}'")
 
-        # Validate timeout if present
-        if "timeout" in config["model"]:
-            timeout = config["model"]["timeout"]
-            # Type check: must be int or float
-            if not isinstance(timeout, (int, float)):
-                raise ConfigError(
-                    f"model.timeout must be int or float, got {type(timeout).__name__}"
-                )
-            # Upper bound: error if > 600.0s
-            if timeout > 600.0:
-                raise ConfigError(
-                    f"model.timeout must not exceed 600.0 seconds (got {timeout})"
-                )
-            # Lower bound: warning if < 5.0s
-            if timeout < 5.0:
-                warnings.warn(
-                    f"model.timeout is very low ({timeout}s). "
-                    "Consider using at least 5.0 seconds for reliability."
-                )
+            # Validate timeout if present
+            if "timeout" in config["model"]:
+                timeout = config["model"]["timeout"]
+                # Type check: must be int or float
+                if not isinstance(timeout, (int, float)):
+                    raise ConfigError(
+                        f"model.timeout must be int or float, got {type(timeout).__name__}"
+                    )
+                # Upper bound: error if > 600.0s
+                if timeout > 600.0:
+                    raise ConfigError(
+                        f"model.timeout must not exceed 600.0 seconds (got {timeout})"
+                    )
+                # Lower bound: warning if < 5.0s
+                if timeout < 5.0:
+                    warnings.warn(
+                        f"model.timeout is very low ({timeout}s). "
+                        "Consider using at least 5.0 seconds for reliability."
+                    )
+
+            # Validate context_window if present
+            if "context_window" in config["model"]:
+                context_window = config["model"]["context_window"]
+                # Type check: must be int
+                if not isinstance(context_window, int):
+                    raise ConfigError(
+                        f"model.context_window must be int, got {type(context_window).__name__}"
+                    )
+                # Lower bound: warning if < 4096 (very small context)
+                if context_window < 4096:
+                    warnings.warn(
+                        f"model.context_window is very small ({context_window}). "
+                        "Consider using at least 8192 tokens for typical use cases."
+                    )
+                # Upper bound: no limit enforced since modern models can have large contexts
 
     # Validate stages section
     if "stages" in config:
@@ -498,7 +516,7 @@ def get_agent_model_config(config: dict, agent_type: str) -> dict:
     Raises:
         ConfigError: If agent_type is not a known agent type.
     """
-    known_agents = {
+    known_agents: set[str] = {
         "summarizer",
         "stage_synthesizer",
         "analyst",
@@ -519,11 +537,14 @@ def get_agent_model_config(config: dict, agent_type: str) -> dict:
 
     # If agent has explicit model config, return it
     if agent_config and "model" in agent_config and agent_config["model"] is not None:
-        return _deep_copy(agent_config["model"])
+        model_config = agent_config["model"]
+        result = _deep_copy(model_config)
+        return result  # type: ignore[return-value,no-any-return]
 
     # Fall back to top-level model config
     model_config = config.get("model", {})
-    return _deep_copy(model_config)
+    result = _deep_copy(model_config)
+    return result  # type: ignore[return-value,no-any-return]
 
 
 def merge_env_overrides(config: dict) -> dict:
@@ -616,7 +637,7 @@ def merge_env_overrides(config: dict) -> dict:
     # Apply env var substitution to all string values
     result = _substitute_env_vars_recursive(result)
 
-    return result
+    return result  # type: ignore[return-value,no-any-return]
 
 
 def _substitute_env_vars_recursive(obj: Any) -> Any:
@@ -636,7 +657,7 @@ def _deep_copy(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {k: _deep_copy(v) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [_deep_copy(item) for item in obj]
+        return [_deep_copy(item) for item in obj]  # type: ignore[misc]
     else:
         return obj
 
@@ -651,12 +672,12 @@ def _deep_merge(base: dict, override: dict) -> dict:
     Returns:
         New dict with override values merged into base.
     """
-    result = _deep_copy(base)
+    result: dict = _deep_copy(base)
 
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
         else:
-            result[key] = _deep_copy(value)
+            result[key] = _deep_copy(value)  # type: ignore[assignment]
 
-    return result
+    return result  # type: ignore[return-value,no-any-return]

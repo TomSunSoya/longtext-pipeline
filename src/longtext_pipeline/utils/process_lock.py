@@ -74,9 +74,14 @@ class InterProcessFileLock:
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
-                import fcntl
+                try:
+                    import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
+                except ImportError:
+                    # fcntl not available on Windows, but we should never reach here
+                    # because os.name == "nt" should be True
+                    pass
         except OSError as exc:
             raise PipelineLockError(
                 f"Another longtext pipeline process is already running for this input. "
@@ -90,9 +95,14 @@ class InterProcessFileLock:
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
-            import fcntl
+            try:
+                import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+            except ImportError:
+                # fcntl not available on Windows, but we should never reach here
+                # because os.name == "nt" should be True
+                pass
 
     def _write_metadata(self, handle: TextIO) -> None:
         metadata = {

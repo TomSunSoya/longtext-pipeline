@@ -11,7 +11,7 @@ metadata (timestamp, sources, token counts, stage status).
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .models import FinalAnalysis, Manifest, StageInfo, StageSummary, Summary
 
@@ -169,13 +169,13 @@ def _format_dict(data: Dict, indent: int = 0) -> str:
 
 def _safe_get(data: Dict, *keys, default: str = "(not available)") -> str:
     """Safely get nested dictionary values with default fallback."""
-    result = data
+    result: Any = data
     for key in keys:
         if isinstance(result, dict):
             result = result.get(key, default)
         else:
             return default
-    return result if result is not None else default
+    return str(result) if result is not None else default
 
 
 def _format_stage_info(info: Optional[StageInfo]) -> str:
@@ -226,7 +226,7 @@ def render_summary(summary: Summary, model: str = "unknown") -> str:
 
     # Simple section extraction from markdown content
     current_section = "notes"
-    current_lines = []
+    current_lines: List[str] = []
 
     for line in content.split("\n"):
         line_stripped = line.strip()
@@ -276,7 +276,7 @@ def render_stage(stage: StageSummary, model: str = "unknown") -> str:
     synthesis = stage.synthesis.strip()
 
     # Try to parse structured sections
-    sections = {
+    sections: Dict[str, str] = {
         "executive_summary": "(none)",
         "consolidated_points": "(none)",
         "entity_synthesis": "(none)",
@@ -286,7 +286,7 @@ def render_stage(stage: StageSummary, model: str = "unknown") -> str:
     }
 
     current_section = "executive_summary"
-    current_lines = []
+    current_lines: List[str] = []
 
     for line in synthesis.split("\n"):
         line_stripped = line.strip()
@@ -346,7 +346,7 @@ def render_final(
     final_result = final.final_result.strip()
 
     # Try to parse structured sections
-    sections = {
+    sections: Dict[str, str] = {
         "executive_summary": "(none)",
         "theme_analysis": "(none)",
         "participant_analysis": "(none)",
@@ -357,7 +357,7 @@ def render_final(
     }
 
     current_section = "executive_summary"
-    current_lines = []
+    current_lines: List[str] = []
 
     for line in final_result.split("\n"):
         line_stripped = line.strip()

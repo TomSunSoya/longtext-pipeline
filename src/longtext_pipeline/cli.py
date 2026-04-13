@@ -7,9 +7,10 @@ command-line interface with proper help texts and command routing.
 import os
 import logging
 from pathlib import Path
+from typing import Any
 
 import typer
-import yaml
+import yaml  # type: ignore[import-untyped]
 from typing_extensions import Annotated
 
 from longtext_pipeline.config import (
@@ -484,11 +485,13 @@ def generate_config_general_template() -> str:
     default_config = DEFAULT_CONFIG.copy()
 
     # Remove input-specific path requirement
-    config_copy = default_config.copy()
-    config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"
-    config_copy["model"]["api_key"] = "${OPENAI_API_KEY}"  # Use environment variable
+    config_copy: dict[str, Any] = default_config.copy()
+    config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"  # type: ignore[index]
+    config_copy["model"]["api_key"] = (
+        "${OPENAI_API_KEY}"  # Use environment variable  # type: ignore[index]
+    )
 
-    return yaml.dump(config_copy, default_flow_style=False, indent=2)
+    return yaml.dump(config_copy, default_flow_style=False, indent=2)  # type: ignore[no-any-return]
 
 
 def generate_config_relationship_template() -> str:
@@ -496,28 +499,30 @@ def generate_config_relationship_template() -> str:
     default_config = DEFAULT_CONFIG.copy()
 
     # Adapt for relationship analysis mode
-    config_copy = default_config.copy()
-    config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"
-    config_copy["model"]["api_key"] = "${OPENAI_API_KEY}"  # Use environment variable
-    config_copy["prompts"]["format"] = "relationship"
+    config_copy: dict[str, Any] = default_config.copy()
+    config_copy["input"]["file_path"] = "YOUR_INPUT_FILE.txt"  # type: ignore[index]
+    config_copy["model"]["api_key"] = (
+        "${OPENAI_API_KEY}"  # Use environment variable  # type: ignore[index]
+    )
+    config_copy["prompts"]["format"] = "relationship"  # type: ignore[index]
 
     # Update prompt templates for relationship analysis
-    config_copy["stages"]["summarize"]["prompt_template"] = (
+    config_copy["stages"]["summarize"]["prompt_template"] = (  # type: ignore[index]
         "prompts/summary_relationship.txt"
     )
-    config_copy["stages"]["stage"]["prompt_template"] = "prompts/stage_relationship.txt"
-    config_copy["stages"]["final"]["prompt_template"] = "prompts/final_relationship.txt"
+    config_copy["stages"]["stage"]["prompt_template"] = "prompts/stage_relationship.txt"  # type: ignore[index]
+    config_copy["stages"]["final"]["prompt_template"] = "prompts/final_relationship.txt"  # type: ignore[index]
 
     # Make relationship analysis specific changes
-    config_copy["stages"]["audit"]["enabled"] = True
-    config_copy["stages"]["audit"]["prompt_template"] = "prompts/audit_relationship.txt"
+    config_copy["stages"]["audit"]["enabled"] = True  # type: ignore[index]
+    config_copy["stages"]["audit"]["prompt_template"] = "prompts/audit_relationship.txt"  # type: ignore[index]
 
-    return yaml.dump(config_copy, default_flow_style=False, indent=2)
+    return yaml.dump(config_copy, default_flow_style=False, indent=2)  # type: ignore[no-any-return]
 
 
 def generate_local_config_template() -> str:
     """Generate a machine-local runtime config template that is auto-loaded on startup."""
-    local_config = {
+    local_config: dict[str, Any] = {
         "model": {
             "provider": "openai",
             "name": "deepseek-chat",
@@ -527,10 +532,10 @@ def generate_local_config_template() -> str:
             "timeout": 120.0,
         }
     }
-    return (
+    return (  # type: ignore[no-any-return]
         "# Machine-local runtime config. This file is auto-loaded on startup\n"
         "# and should stay out of git.\n"
-        + yaml.dump(local_config, default_flow_style=False, indent=2)
+        + yaml.dump(local_config, default_flow_style=False, indent=2)  # type: ignore[no-any-return]
     )
 
 

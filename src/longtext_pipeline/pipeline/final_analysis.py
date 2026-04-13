@@ -153,7 +153,8 @@ class FinalAnalysisStage:
         if requested_limit < 1:
             raise ValueError("pipeline.max_workers must be at least 1.")
 
-        return min(requested_limit, len(selected_specialists))
+        final_limit: int = min(requested_limit, len(selected_specialists))
+        return final_limit
 
     def _build_specialist_prompt(
         self,

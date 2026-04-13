@@ -6,7 +6,9 @@ Supports custom endpoints via OPENAI_BASE_URL for local models, proxies, etc.
 
 import json
 import os
-from typing import Optional
+import asyncio
+import time
+from typing import Optional, Callable
 
 import httpx
 
@@ -19,6 +21,7 @@ from ..errors import (
     LLMCommunicationError,
     LLMResponseError,
 )
+from ..utils.token_budget import TokenBudgetManager, ContextWindowExceededError
 from ..utils.retry import retry_llm_call, retry_llm_call_async
 from .base import LLMClient
 
@@ -55,6 +58,7 @@ class OpenAICompatibleClient(LLMClient):
         api_key: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT,
         temperature: float = 0.7,
+        context_window: int = 128000,  # Default for GLM-5, can be overridden
     ):
         """Initialize the OpenAI-compatible client.
 
@@ -64,6 +68,7 @@ class OpenAICompatibleClient(LLMClient):
             api_key: API key for authentication (default: from OPENAI_API_KEY)
             timeout: Request timeout in seconds (default: 30.0)
             temperature: Sampling temperature for completions (default: 0.7)
+            context_window: Model context window in tokens (default: 128000 for GLM-5)
 
         Raises:
             LLMAuthenticationError: If no API key is provided
@@ -75,6 +80,7 @@ class OpenAICompatibleClient(LLMClient):
         )
         self.timeout = timeout
         self.temperature = temperature
+        self.context_window = context_window
 
         if not self.api_key:
             raise LLMAuthenticationError(
@@ -92,6 +98,9 @@ class OpenAICompatibleClient(LLMClient):
         # Initialize async client params (same config as sync)
         # Store timeout separately for httpx.AsyncClient
         self._async_timeout = httpx.Timeout(timeout)
+
+        # Initialize token budget manager
+        self._token_budget_manager = TokenBudgetManager()
 
     def _build_headers(self) -> dict:
         """Build HTTP headers for requests."""
@@ -116,12 +125,17 @@ class OpenAICompatibleClient(LLMClient):
         Returns:
             Dictionary with request payload
         """
+        # Validate and process token usage before building payload
+        processed_prompt, processed_system_prompt = self._process_token_budget(
+            prompt, system_prompt
+        )
+
         messages = []
 
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        if processed_system_prompt:
+            messages.append({"role": "system", "content": processed_system_prompt})
 
-        messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": processed_prompt})
 
         payload = {
             "model": self.model,
@@ -134,6 +148,59 @@ class OpenAICompatibleClient(LLMClient):
             payload["response_format"] = {"type": "json_object"}
 
         return payload
+
+    def _process_token_budget(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> tuple:
+        """Process prompts with token budget validation before API call.
+
+        Args:
+            prompt: User prompt to process
+            system_prompt: Optional system prompt to process
+
+        Returns:
+            Tuple of (processed_prompt, processed_system_prompt) that fit budgets
+
+        Raises:
+            ContextWindowExceededError: If content exceeds context
+        """
+        try:
+            processed_prompt, processed_system_prompt = (
+                self._token_budget_manager.process_prompt_with_budget(
+                    prompt=prompt,
+                    system_prompt=system_prompt or "",
+                    context_window=self.context_window,
+                )
+            )
+
+            # Issue warning if content was modified during validation
+            if prompt != processed_prompt or system_prompt != processed_system_prompt:
+                # Calculate tokens to show user
+                original_tokens = self._token_budget_manager.estimate_tokens(
+                    (system_prompt or "") + "\n" + prompt
+                )
+                processed_tokens = self._token_budget_manager.estimate_tokens(
+                    (processed_system_prompt or "") + "\n" + processed_prompt
+                )
+
+                import warnings
+
+                warnings.warn(
+                    f"Content was truncated to fit context window - was {original_tokens} "
+                    f"tokens and truncated to {processed_tokens} tokens due to "
+                    f"context window limit of {self.context_window} tokens."
+                )
+
+            return processed_prompt, processed_system_prompt
+
+        except ContextWindowExceededError:
+            # Context window exceeded error - raise as is
+            raise
+        except Exception:
+            # For any other exception that occurs during budget processing
+            raise
 
     def _handle_error(self, status_code: int, response_text: str) -> None:
         """Handle HTTP error responses.
@@ -203,7 +270,7 @@ class OpenAICompatibleClient(LLMClient):
                 if response.status_code != 200:
                     self._handle_error(response.status_code, response.text)
 
-                return response.json()
+                return response.json()  # type: ignore[no-any-return]
 
         except httpx.TimeoutException as e:
             raise LLMTimeoutError(
@@ -251,7 +318,7 @@ class OpenAICompatibleClient(LLMClient):
             if not content:
                 raise LLMResponseError("Empty content in response")
 
-            return content
+            return content  # type: ignore[no-any-return]
 
         except (KeyError, TypeError) as e:
             raise LLMResponseError(f"Failed to parse response structure: {e}") from e
@@ -306,7 +373,7 @@ class OpenAICompatibleClient(LLMClient):
 
             # Parse JSON from response
             try:
-                return json.loads(content)
+                return json.loads(content)  # type: ignore[no-any-return]
             except json.JSONDecodeError as e:
                 raise LLMResponseError(
                     f"Invalid JSON in response: {e}. Content: {content[:200]}"
@@ -345,7 +412,7 @@ class OpenAICompatibleClient(LLMClient):
                 if response.status_code != 200:
                     self._handle_error(response.status_code, response.text)
 
-                return response.json()
+                return response.json()  # type: ignore[no-any-return]
 
         except httpx.TimeoutException as e:
             raise LLMTimeoutError(
@@ -393,7 +460,7 @@ class OpenAICompatibleClient(LLMClient):
             if not content:
                 raise LLMResponseError("Empty content in response")
 
-            return content
+            return content  # type: ignore[no-any-return]
 
         except (KeyError, TypeError) as e:
             raise LLMResponseError(f"Failed to parse response structure: {e}") from e
@@ -419,7 +486,177 @@ class OpenAICompatibleClient(LLMClient):
             LLMContentFilterError: If content violates provider policies
             LLMCommunicationError: For network/communication failures
         """
-        return await self._async_complete(prompt, system_prompt)
+        return await self._async_complete(prompt, system_prompt)  # type: ignore[no-any-return]
+
+    @retry_llm_call_async(max_retries=3, backoff_factor=2.0)
+    async def complete_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        on_chunk: Optional[Callable[[str, int, float], None]] = None,
+    ) -> str:
+        """Stream completion response from the LLM with progress callbacks.
+
+        Args:
+            prompt: The user prompt to send to the LLM
+            system_prompt: Optional system prompt to set context/behavior
+            on_chunk: Optional callback function called for each token received
+                Signature: on_chunk(token: str, tokens_so_far: int, elapsed: float)
+            response_format: Optional response format hint (e.g., "json")
+
+        Returns:
+            The complete response string as generated by the stream
+
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+        """
+        # Build payload and process prompts via existing mechanism
+        processed_prompt, processed_system_prompt = self._process_token_budget(
+            prompt, system_prompt
+        )
+
+        # Prepare messages
+        messages = []
+        if processed_system_prompt:
+            messages.append({"role": "system", "content": processed_system_prompt})
+        messages.append({"role": "user", "content": processed_prompt})
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "stream": True,  # Enable streaming
+        }
+
+        start_time = time.time()
+
+        # Track streamed content
+        response_parts = []
+        tokens_count = 0  # Changed from chunks_count to follow expected parameter name
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._async_timeout, trust_env=False
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    self._endpoint,
+                    headers=self._build_headers(),
+                    json=payload,
+                ) as response:
+                    if response.status_code != 200:
+                        self._handle_error(response.status_code, await response.aread())
+
+                    # Process the streamed response
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            event_data = line[6:]  # Remove "data: " prefix
+
+                            if event_data.strip() == "[DONE]":
+                                break
+
+                            try:
+                                # Parse the SSE event data
+                                parsed_data = json.loads(event_data)
+
+                                # Extract content from choices
+                                choices = parsed_data.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content", "")
+
+                                    if content:
+                                        response_parts.append(content)
+                                        tokens_count += 1
+
+                                        # Calculate elapsed time
+                                        elapsed = time.time() - start_time
+
+                                        # Callback to track progress if provided
+                                        if on_chunk is not None:
+                                            on_chunk(content, tokens_count, elapsed)
+
+                                        # Flush to ensure prompt appears immediately as content streams
+                                        import sys
+
+                                        sys.stdout.flush()
+
+                            except json.JSONDecodeError:
+                                continue  # Skip malformed lines
+
+                # Now join the parts for final result
+                response_str = "".join(response_parts)
+                return response_str  # type: ignore[no-any-return]
+
+        except httpx.TimeoutException as e:
+            raise LLMTimeoutError(
+                f"Request timed out after {self.timeout} seconds"
+            ) from e
+        except httpx.NetworkError as e:
+            raise LLMCommunicationError(f"Network error: {e}") from e
+        except httpx.HTTPError as e:
+            raise LLMCommunicationError(f"HTTP error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise LLMResponseError(f"Invalid JSON response from API: {e}") from e
+
+    def complete_stream_sync(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        on_chunk: Optional[Callable[[str, int, float], None]] = None,
+    ) -> str:
+        """Synchronous wrapper for complete_stream async method.
+
+        Args:
+            prompt: The user prompt to send to the LLM
+            system_prompt: Optional system prompt to set context/behavior
+            on_chunk: Optional callback function called for each token received
+                Signature: on_chunk(token: str, tokens_so_far: int, elapsed: float)
+
+        Returns:
+            The complete response string as generated by the stream
+
+        Raises:
+            LLMTimeoutError: If the request exceeds timeout threshold
+            LLMRateLimitError: If rate limiting is encountered
+            LLMAuthenticationError: If authentication fails
+            LLMContentFilterError: If content violates provider policies
+            LLMCommunicationError: For network/communication failures
+        """
+
+        async def async_call():
+            return await self.complete_stream(prompt, system_prompt, on_chunk)
+
+        return asyncio.run(async_call())
+
+    @staticmethod
+    def default_progress_callback(
+        token: str, tokens_so_far: int, elapsed: float
+    ) -> None:
+        """Static method that displays real-time progress during streaming.
+
+        Args:
+            token: Current streaming token
+            tokens_so_far: Total number of tokens received
+            elapsed: Time elapsed since streaming started
+        """
+        # Format the count with commas like "1,234 tokens..."
+        formatted_count = f"{tokens_so_far:,}"
+        progress_text = f"\rProcessing: {formatted_count} tokens... "
+
+        # Add estimated speed if we have reasonable timing
+        if elapsed > 0.1:
+            tokens_per_sec = tokens_so_far / elapsed
+            progress_text += f"({tokens_per_sec:.1f} tokens/sec)"
+
+        import sys
+
+        sys.stdout.write(progress_text)
+        sys.stdout.flush()
 
     @retry_llm_call_async(max_retries=3, backoff_factor=2.0)
     async def _async_complete_json(
@@ -471,7 +708,7 @@ class OpenAICompatibleClient(LLMClient):
 
             # Parse JSON from response
             try:
-                return json.loads(content)
+                return json.loads(content)  # type: ignore[no-any-return]
             except json.JSONDecodeError as e:
                 raise LLMResponseError(
                     f"Invalid JSON in response: {e}. Content: {content[:200]}"
@@ -502,4 +739,20 @@ class OpenAICompatibleClient(LLMClient):
             LLMCommunicationError: For network/communication failures
             LLMResponseError: If response cannot be parsed as valid JSON
         """
-        return await self._async_complete_json(prompt, system_prompt)
+        return await self._async_complete_json(prompt, system_prompt)  # type: ignore[no-any-return]
+
+
+def print_final_streaming_stats(elapsed: float, tokens_count: int) -> None:
+    """Print final statistics for streamed content.
+
+    Args:
+        elapsed: Total time elapsed for streaming
+        tokens_count: Total number of tokens received
+    """
+    if elapsed > 0:
+        avg_tokens_per_sec = tokens_count / elapsed if elapsed > 0 else 0
+        print(
+            f"\nCompleted in {elapsed:.2f}s at ~{avg_tokens_per_sec:.1f} tokens/sec ({tokens_count:,} tokens total)"
+        )
+    else:
+        print(f"\nCompleted ({tokens_count:,} tokens)")

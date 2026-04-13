@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "longtext-pipeline"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python CLI tool for hierarchical analysis of super-long texts"
 readme = "README.md"
 license = {text = "MIT"}

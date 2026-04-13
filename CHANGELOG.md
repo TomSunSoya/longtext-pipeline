@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Audit prompt templates for general and relationship modes
-- GitHub Actions CI/CD workflow (test, type-check, lint)
-- Comprehensive .gitignore for Python projects
+## [0.1.1] - 2026-04-13
+
+### Fixed
+- Environment variables now correctly override config values (api_key, base_url)
+- Previously used fallback logic instead of override logic
 
 ### Changed
-- Fixed duplicate import in cli.py
+- Updated author email to GitHub noreply address
+- Improved documentation for non-OpenAI provider configuration
+- Added guidance for LONGTEXT_MODEL_NAME requirement with custom endpoints
+- Added common provider examples (DeepSeek, Ollama, OpenRouter)
 
 ## [0.1.0] - 2026-04-03
 

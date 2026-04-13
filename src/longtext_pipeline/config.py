@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
         "api_key": None,  # Will be overridden by env var
         "temperature": 0.7,
         "timeout": 120.0,
-        "context_window": 128000,  # For GLM-5 model as default
+        "context_window": 128000,  # For GPT-4o-mini model as default
     },
     "stages": {
         "ingest": {
@@ -578,16 +578,14 @@ def merge_env_overrides(config: dict) -> dict:
         result["model"] = {}
 
     # OPENAI_API_KEY overrides model.api_key
-    if "api_key" not in result["model"]:
-        result["model"]["api_key"] = os.environ.get("OPENAI_API_KEY", None)
-    elif result["model"]["api_key"] is None:
-        result["model"]["api_key"] = os.environ.get("OPENAI_API_KEY", None)
+    api_key_override = os.environ.get("OPENAI_API_KEY")
+    if api_key_override:
+        result["model"]["api_key"] = api_key_override
 
     # OPENAI_BASE_URL overrides model.base_url
-    if "base_url" not in result["model"]:
-        result["model"]["base_url"] = os.environ.get("OPENAI_BASE_URL", None)
-    elif result["model"]["base_url"] is None:
-        result["model"]["base_url"] = os.environ.get("OPENAI_BASE_URL", None)
+    base_url_override = os.environ.get("OPENAI_BASE_URL")
+    if base_url_override:
+        result["model"]["base_url"] = base_url_override
 
     # Provider override
     provider_override = os.environ.get("LONGTEXT_MODEL_PROVIDER")

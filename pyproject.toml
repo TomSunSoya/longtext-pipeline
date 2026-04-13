@@ -9,7 +9,7 @@ description = "A Python CLI tool for hierarchical analysis of super-long texts"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "longtext-pipeline Team", email = "team@longtext.example.com"}
+    {name = "longtext-pipeline Team", email = "TomSunSoya@users.noreply.github.com"}
 ]
 requires-python = ">=3.10"
 keywords = ["llm", "cli", "summarization", "long-context", "analysis", "openai-compatible"]

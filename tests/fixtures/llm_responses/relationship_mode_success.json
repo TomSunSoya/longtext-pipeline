@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_008_relationship_mode_success",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 1800,
+    "completion_tokens": 600,
+    "total_tokens": 2400,
+    "timestamp": "2026-04-14T10:55:00Z",
+    "response": {
+        "content": "# Relationship Analysis Report\n\nThis analysis focuses on entity relationships, network structures, and connection patterns found in the document.\n\n## Entities Identified\n\n### Primary Entities (12)\n1. LongContext Pipeline - Central processing framework\n2. Hierarchical Analysis - Key methodology\n3. LLM Integration - Core technology\n4. Document Decomposition - Critical technique\n\n### Secondary Entities (8)\n1. Chunk Processing - Basic unit of work\n2. Checkpoint System - Resume mechanism\n3. Streaming Output - Real-time feedback\n4. Cross-Reference - Linkage technique\n\n## Key Relationships\n\nLongContext Pipeline\n  - Hierarchical Analysis\n    - Document Decomposition\n    - Stage Synthesis\n  - LLM Integration\n    - Parallel Processing\n    - Token Budget Management\n  - Streaming Output\n    - Real-time Feedback\n\n## Network Statistics\n- Total Nodes: 20\n- Total Edges: 35\n- Average Degree: 3.5\n- Network Density: 0.18\n- Centralization: 0.62\n\n## recommendations\n\n1. Focus on strengthening weak relationships\n2. Map additional entity connections for better coverage\n3. Consider temporal relationships for dynamic analysis\n\n---\n*Relationship analysis completed in 15.2 seconds*",
+        "finish_reason": "stop",
+        "logprobs": null
+    }
+}

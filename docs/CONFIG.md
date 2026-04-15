@@ -26,6 +26,7 @@ Supported sections in the current schema:
 - `output`
 - `input`
 - `pipeline`
+- `ocr`
 - `logging`
 - `agents`
 
@@ -50,7 +51,10 @@ stages:
   stage:
     group_size: 5
   audit:
-    enabled: false
+    enabled: true
+
+output:
+  dir: ./artifacts
 
 pipeline:
   allow_resume: true
@@ -67,18 +71,19 @@ logging:
 The runtime recognizes these overrides:
 
 - `OPENAI_API_KEY` — API key for authentication
-- `OPENAI_BASE_URL` — Custom API endpoint (for non-OpenAI providers)
-- `LONGTEXT_MODEL_NAME` — Model name (required if using non-OpenAI providers)
+- `OPENAI_BASE_URL` — Custom API endpoint for non-OpenAI providers
+- `LONGTEXT_MODEL_NAME` — Model name
 - `LONGTEXT_MODEL_PROVIDER` — Provider identifier
-- `LONGTEXT_OUTPUT_DIR` — Output directory
+- `LONGTEXT_OUTPUT_DIR` — Output directory override
 - `LONGTEXT_PROMPTS_DIR` — Custom prompts directory
 - `LONGTEXT_LOG_LEVEL` — Log verbosity
 - `LONGTEXT_LOG_FORMAT` — Log format (`text` or `json`)
 - `LONGTEXT_LOG_FILE` — Log file path
 
-**Important**: The default model is `gpt-4o-mini`. If you set `OPENAI_BASE_URL` to a non-OpenAI endpoint (e.g., DeepSeek, Ollama), you must also set `LONGTEXT_MODEL_NAME` to a model supported by that provider.
+The default model is `gpt-4o-mini`. If you set `OPENAI_BASE_URL` to a non-OpenAI endpoint such as DeepSeek or Ollama, also set `LONGTEXT_MODEL_NAME` to a model that provider actually serves.
 
-**Example for DeepSeek**:
+Example for DeepSeek:
+
 ```bash
 export OPENAI_API_KEY="your-deepseek-api-key"
 export OPENAI_BASE_URL="https://api.deepseek.com"
@@ -98,7 +103,7 @@ Controls stage-specific behavior such as:
 - ingest chunk size and overlap
 - summarize batch size
 - stage group size
-- audit enablement
+- audit enablement and prompt template selection
 
 ### `prompts`
 
@@ -107,14 +112,23 @@ Holds prompt-template metadata.
 Important:
 
 - The packaged runtime includes built-in prompt templates under `longtext_pipeline/prompts/`.
-- The current pipeline stages load bundled templates by mode.
-- `prompts.dir` and stage `prompt_template` fields are most useful for advanced overrides, validation, and repository-based development workflows.
+- Runtime stages load bundled templates by mode unless overridden.
+- `audit_reporting.py` now builds token-budgeted audit prompts instead of concatenating unbounded source and analysis text.
 
 ### `output`
 
-The schema includes output-related keys, but the current runtime still writes its working directory next to the input file in `.longtext/`.
+`output.dir` is validated and created during config loading.
 
-Treat this block as partially implemented metadata rather than a guaranteed output router.
+In the standard single-file pipeline path:
+
+- part, summary, stage, final-analysis, and metrics files are written under `<output.dir>/.longtext/`
+- manifest and lock files remain next to the input file in its local `.longtext/`
+
+For batch runs, be careful with a shared explicit `output.dir`, because artifacts are not namespaced per input file.
+
+### `input`
+
+Holds source-level settings such as encoding and related preprocessing controls.
 
 ### `pipeline`
 
@@ -124,6 +138,10 @@ Current notable keys:
 - `audit_enabled`
 - `max_workers`
 - `specialist_count`
+
+### `ocr`
+
+Holds OCR-related controls used by the extraction fallback path.
 
 ### `agents`
 
@@ -143,3 +161,4 @@ Lets advanced users override model settings per role, for example:
 - For normal local use, keep secrets in `longtext.local.yaml` and commit only reusable example configs.
 - If you just want the default prompts, do not change `prompts.dir`.
 - If you distribute a packaged install, verify the wheel includes prompt `.txt` files.
+- For the least surprising manual runs, prefer `.txt` and `.md` inputs until the top-level PDF/DOCX path is fully normalized.

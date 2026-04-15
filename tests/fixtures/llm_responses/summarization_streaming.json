@@ -1,0 +1,38 @@
+{
+    "request_id": "resp_002_summarization_streaming",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 456,
+    "completion_tokens": 234,
+    "total_tokens": 690,
+    "timestamp": "2026-04-14T10:31:00Z",
+    "chunks": [
+        {
+            "delta": {"role": "assistant", "content": "This chunk covers "},
+            "timestamp": "2026-04-14T10:31:00.100Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "the methodology "},
+            "timestamp": "2026-04-14T10:31:00.250Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "section explaining "},
+            "timestamp": "2026-04-14T10:31:00.400Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "the hierarchical "},
+            "timestamp": "2026-04-14T10:31:00.550Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "processing approach "},
+            "timestamp": "2026-04-14T10:31:00.700Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "used throughout "},
+            "timestamp": "2026-04-14T10:31:00.850Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "the analysis pipeline."},
+            "timestamp": "2026-04-14T10:31:01.000Z"
+        }
+    ]
+}

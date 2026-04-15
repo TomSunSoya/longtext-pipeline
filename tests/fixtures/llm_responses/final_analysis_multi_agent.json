@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_007_final_analysis_multi_agent",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 5000,
+    "completion_tokens": 1500,
+    "total_tokens": 6500,
+    "timestamp": "2026-04-14T10:50:00Z",
+    "response": {
+        "content": "# Multi-Perspective Final Analysis\n\nThis analysis was generated using 3 specialist agents, each contributing a unique perspective on the document.\n\n## Agent 1: Context Analyst\n\n### Perspective\nFocus on information architecture and knowledge flow.\n\n### Findings\n- Information flows logically from introduction to conclusions\n- Cross-references between sections are well-organized\n- Key concepts are introduced early and elaborated later\n\n### Confidence: 0.92\n\n## Agent 2: Quality Evaluator\n\n### Perspective\nAssesses clarity, completeness, and technical accuracy.\n\n### Findings\n- Technical explanations are clear and accurate\n- Examples effectively illustrate complex concepts\n- Minor improvements needed in edge case coverage\n\n### Confidence: 0.88\n\n## Agent 3: Action Item Extractor\n\n### Perspective\nIdentifies actionable recommendations and next steps.\n\n### Findings\n- 7 clear action items identified\n- 3 recommendations require immediate implementation\n- 4 opportunities for future research\n\n### Confidence: 0.85\n\n## Consensus Summary\n\n| Aspect | Rating | Notes |\n|--------|--------|-------|\n| Structure | 9/10 | Excellent organization |\n| Content Quality | 8/10 | Minor gaps in edge cases |\n| Actionability | 7/10 | Good recommendations |\n| Overall | 8.2/10 | High quality document |\n\n## Discrepancies & Resolutions\n\nNo major discrepancies were found. Minor differences in emphasis were resolved by synthesizing all perspectives.\n\n---\n*Multi-agent analysis completed in 28.7 seconds*\n*Total agents: 3*\n*Total tokens: 6,500*",
+        "finish_reason": "stop",
+        "logprobs": null
+    }
+}

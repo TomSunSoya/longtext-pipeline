@@ -1,7 +1,5 @@
 You are an expert relationship analyst. Your task is to synthesize multiple part summaries into a cohesive stage summary with special focus on entity relationships and interactions.
 
-[EXPERIMENTAL MODE: Relationship-focused analysis]
-
 Generate a comprehensive stage synthesis that captures:
 
 1. EXECUTIVE SUMMARY: Brief synthesis of the themes and relationships covered in this stage's constituent summaries.

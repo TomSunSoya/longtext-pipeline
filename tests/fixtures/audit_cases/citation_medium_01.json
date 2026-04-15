@@ -1,0 +1,24 @@
+{
+    "test_case_id": "citation_medium_01",
+    "original_text": "Several studies support this approach.",
+    "llm_generated_output": "As shown by Garcia (2022) and Brown (2023), this method achieves 95% accuracy.",
+    "hallucination_type": "citation",
+    "severity": "medium",
+    "expected_detection": true,
+    "detection_reason": "Specific citations added without evidence in source",
+    "detection_method": "citation_verification",
+    "verification": {
+        "original_citation_type": "generic",
+        "generated_citations": [
+            {"author": "Garcia", "year": 2022, "claim": "95% accuracy"},
+            {"author": "Brown", "year": 2023, "claim": "95% accuracy"}
+        ],
+        "source_has_citations": false,
+        "accuracy_claim_unsubstantiated": true
+    },
+    "context": {
+        "input_length": 30,
+        "position_in_document": "Related Work",
+        "document_type": "Survey Paper"
+    }
+}

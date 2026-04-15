@@ -1,0 +1,23 @@
+{
+    "test_case_id": "citation_high_01",
+    "original_text": "See Appendix A for methodology details.",
+    "llm_generated_output": "According to Johnson et al. (2023) in their paper 'Deep Architecture Analysis for Long Text Processing', Section 3.2...",
+    "hallucination_type": "citation",
+    "severity": "high",
+    "expected_detection": true,
+    "detection_reason": "Non-existent citation in reference list",
+    "detection_method": "citation_verification",
+    "verification": {
+        "citation_found": false,
+        "author": "Johnson",
+        "year": 2023,
+        "title": "Deep Architecture Analysis for Long Text Processing",
+        "reference_list": ["Smith2022", "Lee2023", "Chen2024"],
+        "missing": ["Johnson2023"]
+    },
+    "context": {
+        "input_length": 30,
+        "position_in_document": "Introduction",
+        "type": "Invented source"
+    }
+}

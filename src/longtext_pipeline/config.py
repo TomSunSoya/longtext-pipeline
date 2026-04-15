@@ -19,6 +19,137 @@ AUTO_CONFIG_FILENAMES = (
 DEFAULT_PROMPTS_DIR = str((Path(__file__).resolve().parent / "prompts").resolve())
 
 
+def migrate_config(config: dict, source_path: Optional[str | Path] = None) -> dict:
+    """Migrate config from v1 flat format to v2 nested format.
+
+       This function detects v1-style configurations and converts them to v2 format
+       while issuing deprecation warnings. The migration is applied at runtime only
+       - user config files are NOT modified.
+
+       Args:
+           config: Configuration dictionary to migrate.
+           source_path: Path to source config file for warnings (optional).
+
+       Returns:
+           Migrated configuration dictionary. The original config dict is not modified.
+
+       Notes:
+           - v1 format uses flat `model.name` structure
+           - v2 format uses nested `model.providers` structure
+        - All migrations create copies to avoid mutating original data
+        - Deprecation warnings alert users to modernize their configs
+
+    Examples:
+        >>> v1_config = {"model": {"name": "gpt-4o", "provider": "openai"}}
+        >>> migrated = migrate_config(v1_config)
+        >>> "providers" in migrated["model"]
+        True
+    """
+
+    # Create a deep copy to avoid modifying the original
+    migrated = _deep_copy(config)
+
+    source_hint = f" (from {source_path})" if source_path else ""
+
+    # Check for v1 flat model format (model.name with no model.providers)
+    if "model" in migrated:
+        model_config = migrated["model"]
+
+        # If model has a "name" field but NO nested "providers" structure, it's v1 format
+        if "name" in model_config and "providers" not in model_config:
+            warnings.warn(
+                f"Config uses deprecated flat model format. "
+                f"Convert to nested 'model.providers' structure for v2 compatibility.{source_hint}",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
+            # Extract current model fields for use in new structure
+            current_provider = model_config.get("provider", "openai")
+            current_name = model_config.get("name")
+
+            # Build the nested providers structure
+            # Keep all other model fields (base_url, api_key, temperature, etc.)
+            providers_dict = {
+                "default": {
+                    "provider": current_provider,
+                    "name": current_name,
+                }
+            }
+
+            # Preserve other model fields that aren't part of provider spec
+            preserved_fields = {}
+            for key, value in model_config.items():
+                if key not in ("provider", "name"):
+                    preserved_fields[key] = value
+
+            # Rebuild model config with providers structure
+            model_config["providers"] = providers_dict
+            # Add preserved fields back to top-level model
+            for key, value in preserved_fields.items():
+                model_config[key] = value
+
+    # Check for v1 agent config format (agents with model: provider,name format)
+    # v2 format supports nested "model.providers" structure
+    if "agents" in migrated:
+        agents_config = migrated["agents"]
+        # Process each agent to migrate legacy model config to providers format if needed
+        for agent_key, agent_config in agents_config.items():
+            if (
+                isinstance(agent_config, dict)
+                and "model" in agent_config
+                and isinstance(agent_config["model"], dict)
+            ):
+                model_spec = agent_config["model"]
+                # Check if this looks like legacy format (has name/key without providers struct)
+                # and no existing providers section (meaning it hasn't already been migrated)
+                if "name" in model_spec and "providers" not in model_spec:
+                    # Migrate this agent's model config to new format
+                    source_name = f"'agents.{agent_key}'"
+                    warnings.warn(
+                        f"Agents configuration '{source_name}' uses deprecated format. "
+                        f"Convert to nested 'providers' structure for v2 compatibility.{source_hint}",
+                        DeprecationWarning,
+                        stacklevel=3,
+                    )
+
+                    current_provider = model_spec.get("provider", "openai")
+                    current_name = model_spec.get("name")
+
+                    if current_name:  # Only migrate if there's a name
+                        providers_dict = {
+                            "default": {
+                                "provider": current_provider,
+                                "name": current_name,
+                            }
+                        }
+
+                        # Preserve other model fields that aren't part of provider spec
+                        preserved_fields = {}
+                        for key, value in model_spec.items():
+                            if key not in ("provider", "name"):
+                                preserved_fields[key] = value
+
+                        # Update model config with providers structure
+                        new_model_spec = {**model_spec}
+                        new_model_spec["providers"] = providers_dict
+
+                        # Clean up the preserved fields
+                        for key in ("provider", "name"):
+                            new_model_spec.pop(key, None)  # Remove old fields
+
+                        # Add preserved fields back
+                        new_model_spec.update(preserved_fields)
+
+                        # Replace the model configuration in agent config
+                        agent_config["model"] = new_model_spec
+                        migrated["agents"][agent_key] = (
+                            agent_config  # Update the master copy
+                        )
+
+    return migrated
+
+
 class ConfigError(Exception):
     """Raised when configuration loading or validation fails."""
 
@@ -33,6 +164,17 @@ DEFAULT_CONFIG = {
         "temperature": 0.7,
         "timeout": 120.0,
         "context_window": 128000,  # For GPT-4o-mini model as default
+        "providers": {
+            "default": {
+                "provider": "openai",
+                "name": "gpt-4o-mini",
+                "base_url": None,
+                "api_key": None,
+                "temperature": 0.7,
+                "timeout": 120.0,
+            }
+        },
+        "dispatch_mode": "parallel",  # Options: 'single', 'parallel', 'fastest', 'ranked'
     },
     "stages": {
         "ingest": {
@@ -51,7 +193,7 @@ DEFAULT_CONFIG = {
             "prompt_template": "prompts/final_general.txt",
         },
         "audit": {
-            "enabled": False,
+            "enabled": True,
             "prompt_template": "prompts/audit_general.txt",
         },
     },
@@ -74,9 +216,17 @@ DEFAULT_CONFIG = {
     },
     "pipeline": {
         "allow_resume": True,
-        "audit_enabled": False,
+        "audit_enabled": True,
         "max_workers": 4,
         "specialist_count": 4,
+    },
+    "ocr": {
+        "enabled": False,
+        "paddle_api_token": None,  # Will be overridden by env vars
+        "paddle_api_url": "https://kbierdt4sav0zbee.aistudio-app.com/layout-parsing",
+        "use_local_fallback": True,
+        "api_failures_before_fallback": 1,
+        "threshold_token_ratio": 0.05,
     },
     "logging": {
         "level": "INFO",
@@ -132,8 +282,10 @@ def load_config(path: Optional[str] = None) -> dict:
         return result  # type: ignore[return-value,no-any-return]
 
     loaded = _load_yaml_file(path)
-    # Merge loaded config with defaults (loaded takes precedence)
-    return _deep_merge(DEFAULT_CONFIG, loaded)
+    # Migrate config from v1 to v2 format if needed
+    migrated = migrate_config(loaded, source_path=path)
+    # Merge migrated config with defaults (migrated takes precedence)
+    return _deep_merge(DEFAULT_CONFIG, migrated)
 
 
 def _load_yaml_file(path: str | Path) -> dict:
@@ -222,6 +374,39 @@ def format_missing_settings_message(missing: list[str]) -> str:
     return f"Missing required configuration: {', '.join(missing)}. Please {detail}."
 
 
+def _validate_output_dir(config: dict) -> None:
+    """Validate output directory configuration.
+
+    Args:
+        config: Configuration dictionary containing output section.
+
+    Raises:
+        ConfigError: If output.dir is not writable or cannot be created.
+    """
+    output = config.get("output", {})
+    output_dir = output.get("dir", DEFAULT_CONFIG["output"]["dir"])
+
+    if output_dir is None:
+        # Use default if not specified
+        output_dir = DEFAULT_CONFIG["output"]["dir"]
+
+    output_path = Path(output_dir).resolve()
+
+    # Create directory if it doesn't exist
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        raise ConfigError(f"Cannot create output directory '{output_dir}': {e}")
+
+    # Check if directory is writable
+    test_file = output_path / ".longtext_write_test"
+    try:
+        test_file.touch()
+        test_file.unlink()
+    except (OSError, PermissionError) as e:
+        raise ConfigError(f"Output directory '{output_dir}' is not writable: {e}")
+
+
 def validate_config(config: dict) -> bool:
     """Validate configuration structure and warn on unknown keys.
 
@@ -244,6 +429,7 @@ def validate_config(config: dict) -> bool:
         "output",
         "input",
         "pipeline",
+        "ocr",  # Add ocr to the set of known top-level configuration keys
         "logging",
         "agents",
     }
@@ -257,6 +443,8 @@ def validate_config(config: dict) -> bool:
         "temperature",
         "timeout",
         "context_window",
+        "providers",
+        "dispatch_mode",
     }
     known_ingest_keys = {"chunk_size", "overlap_rate"}
     known_summarize_keys = {"prompt_template", "batch_size"}
@@ -266,12 +454,24 @@ def validate_config(config: dict) -> bool:
     known_prompts_keys = {"dir", "format"}
     known_output_keys = {"dir", "naming", "save_intermediate"}
     known_naming_keys = {"summarize_prefix", "stage_prefix", "final_filename"}
+
+    # Validate output directory (must exist and be writable)
+    _validate_output_dir(config)
+
     known_input_keys = {"file_path", "encoding"}
     known_pipeline_keys = {
         "allow_resume",
         "audit_enabled",
         "max_workers",
         "specialist_count",
+    }
+    known_ocr_keys = {
+        "enabled",
+        "paddle_api_token",
+        "paddle_api_url",
+        "use_local_fallback",
+        "api_failures_before_fallback",
+        "threshold_token_ratio",
     }
     known_logging_keys = {"level", "format", "file"}
 
@@ -321,6 +521,43 @@ def validate_config(config: dict) -> bool:
                         "Consider using at least 8192 tokens for typical use cases."
                     )
                 # Upper bound: no limit enforced since modern models can have large contexts
+
+            # Validate providers if present
+            if "providers" in config["model"]:
+                providers = config["model"]["providers"]
+                if not isinstance(providers, dict):
+                    raise ConfigError("model.providers must be a dictionary")
+
+                # Check each provider
+                for provider_key, provider_config in providers.items():
+                    if not isinstance(provider_config, dict):
+                        raise ConfigError(
+                            f"Each provider in model.providers must be a dictionary, found {type(provider_config).__name__}"
+                        )
+
+                    # Check known keys for provider configuration
+                    known_provider_keys = {
+                        "provider",
+                        "name",
+                        "base_url",
+                        "api_key",
+                        "temperature",
+                        "timeout",
+                        "context_window",
+                    }
+                    for key in provider_config:
+                        if key not in known_provider_keys:
+                            warnings.warn(
+                                f"Unknown configuration key in model.providers.{provider_key}: '{key}'"
+                            )
+
+            # Validate dispatch_mode if present
+            if "dispatch_mode" in config["model"]:
+                dispatch_mode = config["model"]["dispatch_mode"]
+                if dispatch_mode not in ("single", "parallel", "fastest", "ranked"):
+                    warnings.warn(
+                        f"model.dispatch_mode is '{dispatch_mode}', but should be one of: 'single', 'parallel', 'fastest', 'ranked'"
+                    )
 
     # Validate stages section
     if "stages" in config:
@@ -373,7 +610,9 @@ def validate_config(config: dict) -> bool:
                     )
                 # If audit.enabled=true, check prompt_template file exists
                 elif audit.get("enabled") is True:
-                    prompts_dir = config.get("prompts", {}).get("dir", DEFAULT_PROMPTS_DIR)
+                    prompts_dir = config.get("prompts", {}).get(
+                        "dir", DEFAULT_PROMPTS_DIR
+                    )
                     # Extract just the filename from prompt_template (e.g., "prompts/audit_general.txt" → "audit_general.txt")
                     template_filename = Path(prompt_template).name
                     template_path = Path(prompts_dir) / template_filename
@@ -420,6 +659,44 @@ def validate_config(config: dict) -> bool:
         for key in config["pipeline"]:
             if key not in known_pipeline_keys:
                 warnings.warn(f"Unknown configuration key in pipeline: '{key}'")
+
+    # Validate OCR section
+    if "ocr" in config:
+        for key in config["ocr"]:
+            if key not in known_ocr_keys:
+                warnings.warn(f"Unknown configuration key in ocr: '{key}'")
+        # Validate OCR enabled flag type
+        if "enabled" in config["ocr"]:
+            enabled = config["ocr"]["enabled"]
+            if not isinstance(enabled, bool):
+                warnings.warn(
+                    f"ocr.enabled must be boolean, got {type(enabled).__name__}"
+                )
+        # Validate OCR use_local_fallback flag type
+        if "use_local_fallback" in config["ocr"]:
+            use_local = config["ocr"]["use_local_fallback"]
+            if not isinstance(use_local, bool):
+                warnings.warn(
+                    f"ocr.use_local_fallback must be boolean, got {type(use_local).__name__}"
+                )
+        # Validate OCR api_failures_before_fallback type
+        if "api_failures_before_fallback" in config["ocr"]:
+            failures = config["ocr"]["api_failures_before_fallback"]
+            if not isinstance(failures, int) or failures < 1:
+                warnings.warn(
+                    f"ocr.api_failures_before_fallback must be positive integer, got {failures}"
+                )
+        # Validate threshold_token_ratio type and range
+        if "threshold_token_ratio" in config["ocr"]:
+            threshold = config["ocr"]["threshold_token_ratio"]
+            if (
+                not isinstance(threshold, (int, float))
+                or threshold < 0
+                or threshold > 1
+            ):
+                warnings.warn(
+                    f"ocr.threshold_token_ratio must be float between 0 and 1, got {threshold}"
+                )
 
     # Validate logging section
     if "logging" in config:
@@ -534,16 +811,98 @@ def get_agent_model_config(config: dict, agent_type: str) -> dict:
     agents_config = config.get("agents", {})
     agent_config = agents_config.get(agent_type, {})
 
-    # If agent has explicit model config, return it
+    # Check for the new providers configuration format
+    providers_config = config.get("model", {}).get("providers", {})
+
+    # If agent has explicit model config using providers, return it
     if agent_config and "model" in agent_config and agent_config["model"] is not None:
         model_config = agent_config["model"]
-        result = _deep_copy(model_config)
-        return result  # type: ignore[return-value,no-any-return]
+        # If model_config has provider reference, resolve it from providers
+        if isinstance(model_config, str) and model_config in providers_config:
+            resolved_model_config = _deep_copy(providers_config[model_config])
+        else:
+            resolved_model_config = _deep_copy(model_config)
+        return resolved_model_config  # type: ignore[return-value,no-any-return]
+
+    # Check if there's default provider configuration for this agent type
+    default_provider_key = agent_config.get("default_provider")
+    if default_provider_key and default_provider_key in providers_config:
+        resolved_model_config = _deep_copy(providers_config[default_provider_key])
+        return resolved_model_config  # type: ignore[return-value,no-any-return]
 
     # Fall back to top-level model config
     model_config = config.get("model", {})
     result = _deep_copy(model_config)
     return result  # type: ignore[return-value,no-any-return]
+
+
+def get_agent_provider_configs(config: dict, agent_type: str) -> list:
+    """Get list of provider configurations for multi-provider mode per agent.
+
+    Args:
+        config: Full configuration dictionary.
+        agent_type: Agent type name (e.g., 'summarizer', 'analyst', 'topic_analyst').
+
+    Returns:
+        List of provider configuration dictionaries to be used in parallel
+    """
+    known_agents: set[str] = {
+        "summarizer",
+        "stage_synthesizer",
+        "analyst",
+        "auditor",
+        "topic_analyst",
+        "entity_analyst",
+        "sentiment_analyst",
+        "timeline_analyst",
+    }
+
+    if agent_type not in known_agents:
+        raise ConfigError(
+            f"Unknown agent type '{agent_type}'. Supported: {', '.join(known_agents)}"
+        )
+
+    agents_config = config.get("agents", {})
+    agent_config = agents_config.get(agent_type, {})
+
+    # Check for multi-provider configuration for this agent
+    provider_configs = agent_config.get("providers", [])
+
+    if provider_configs and isinstance(provider_configs, list):
+        # This is a multi-provider configuration
+        return _deep_copy(provider_configs)
+
+    # Check if agent has a provider reference that maps to a main providers section
+    model_name = agent_config.get("model")
+    if model_name and isinstance(model_name, str):
+        main_providers = config.get("model", {}).get("providers", {})
+        if model_name in main_providers:
+            # Single provider specified in main providers section - return as single-item list for compatibility
+            provider_config = main_providers[model_name].copy()
+            provider_config["provider"] = provider_config.get("provider", "openai")
+            return [provider_config]
+
+    # Check if agent config has providers specified directly in its config as array
+    if "model" in agent_config and isinstance(agent_config["model"], dict):
+        agent_model_config = agent_config["model"]
+        agent_providers = agent_model_config.get("providers", {})
+
+        # If agents specify a specific provider name in their config
+        agent_provider_ref = agent_model_config.get("provider_reference")
+        if agent_provider_ref and agent_provider_ref in agent_providers:
+            provider_config = agent_providers[agent_provider_ref].copy()
+            return [provider_config]
+
+        # If agent specifies "providers" as a list of configurations
+        if "providers" in agent_model_config and isinstance(
+            agent_model_config["providers"], list
+        ):
+            return _deep_copy(agent_model_config["providers"])
+
+    # Fall back to single provider using top-level config and agent-specific override
+    model_config = get_agent_model_config(config, agent_type)
+    model_config["provider"] = model_config.get("provider", "openai")
+    return [model_config]
 
 
 def merge_env_overrides(config: dict) -> dict:

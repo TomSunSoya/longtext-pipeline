@@ -1,0 +1,22 @@
+{
+    "test_case_id": "contradiction_high_01",
+    "original_text": "The algorithm processes chunks sequentially.",
+    "llm_generated_output": "Chunks are processed in parallel using 8 workers.",
+    "hallucination_type": "contradiction",
+    "severity": "high",
+    "expected_detection": true,
+    "detection_reason": "Direct contradiction of sequential vs parallel processing approach",
+    "detection_method": "consistency_check",
+    "verification": {
+        "original_claim": "Sequential processing",
+        "contradicting_claim": "Parallel processing with 8 workers",
+        "claim_type": "processing_method",
+        "consistency_violation": true,
+        "severity": "high"
+    },
+    "context": {
+        "input_length": 150,
+        "position_in_document": "Methods Section",
+        "document_type": "Research Paper"
+    }
+}

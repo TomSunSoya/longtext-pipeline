@@ -51,7 +51,7 @@ def run(
         str,
         typer.Argument(
             ...,
-            help="Path to the input text file (.txt or .md) to be analyzed.",
+            help="Path to the input text file (.txt, .md, or .docx) to be analyzed.",
         ),
     ],
     config: Annotated[
@@ -105,17 +105,17 @@ def run(
         ),
     ] = None,
 ) -> int:
-    """Run the hierarchical analysis pipeline on a text file.
+    """Run the hierarchical analysis pipeline on a single text file.
 
     This is the main command that orchestrates the five-stage processing flow:
     Ingest → Summarize → Stage → Final → Audit
 
     Args:
-        input_file: Path to the input text file (.txt or .md) to be analyzed.
+        input_file: Path to the input text file (.txt, .md, or .docx) to be analyzed.
         config: Optional configuration file path. If not provided, uses default
             configuration or falls back to environment variables.
         mode: Select analysis type. 'general' for standard analysis, 'relationship'
-            for entity relationship discovery optimization.
+            for entity relationship discovery.
         resume: Resume from existing manifest checkpoint if processing was interrupted.
 
     Returns:
@@ -127,6 +127,41 @@ def run(
 
         # With custom config
         $ longtext run input.md --config /path/to/config.yaml
+
+        # DOCX file support
+        $ longtext run document.docx
+
+        # Resume interrupted analysis
+        $ longtext run input.txt --resume
+
+        # Run with relationship-focused mode
+        $ longtext run input.md --mode relationship
+    """
+    """Run the hierarchical analysis pipeline on a text file.
+
+    This is the main command that orchestrates the five-stage processing flow:
+    Ingest → Summarize → Stage → Final → Audit
+
+    Args:
+        input_file: Path to the input text file (.txt, .md, or .docx) to be analyzed.
+        config: Optional configuration file path. If not provided, uses default
+            configuration or falls back to environment variables.
+        mode: Select analysis type. 'general' for standard analysis, 'relationship'
+            for entity relationship discovery.
+        resume: Resume from existing manifest checkpoint if processing was interrupted.
+
+    Returns:
+        int: Exit code (0 for success, 1 for error, 2 for partial success)
+
+    Examples:
+        # Basic usage
+        $ longtext run input.txt
+
+        # With custom config
+        $ longtext run input.md --config /path/to/config.yaml
+
+        # DOCX file support
+        $ longtext run document.docx
 
         # Resume interrupted analysis
         $ longtext run input.txt --resume
@@ -250,7 +285,7 @@ def _validate_input_file(input_path: str) -> str:
     Raises:
         FileNotFoundError: If file does not exist
         PermissionError: If file cannot be read
-        ValueError: If file extension is not .txt or .md
+        ValueError: If file extension is not supported
     """
     path = Path(input_path).resolve()
 
@@ -262,14 +297,258 @@ def _validate_input_file(input_path: str) -> str:
     if not path.is_file():
         raise ValueError(f"Input path is not a file: {input_path}")
 
-    # Check extension (only txt/md supported)
+    # Check extension (now including PDF and DOCX)
     ext = path.suffix.lower()
-    if ext not in [".txt", ".md"]:
+    if ext not in [".txt", ".md", ".pdf", ".docx"]:
         raise ValueError(
-            f"Unsupported file format. Only .txt and .md files are supported, got: {ext}"
+            f"Unsupported file format. Only .txt, .md, .pdf, and .docx files are supported, got: {ext}"
         )
 
     return str(path)
+
+
+@app.command()
+def batch(
+    input_pattern: Annotated[
+        str,
+        typer.Argument(
+            ...,
+            help="Glob pattern or comma-separated list of input files (.txt, .md, .docx). Example: 'inputs/*.txt' or 'file1.txt,file2.txt,file3.txt'",
+        ),
+    ],
+    config: Annotated[
+        str | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Optional configuration file path. If not provided, uses default configuration.",
+        ),
+    ] = None,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            "-m",
+            help="Select analysis type. 'general' for standard analysis, 'relationship' for entity relationship discovery.",
+        ),
+    ] = "general",
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            "-r",
+            help="Resume from existing manifest checkpoint if processing was interrupted.",
+        ),
+    ] = False,
+    multi_perspective: Annotated[
+        bool,
+        typer.Option(
+            "--multi-perspective",
+            "-mp",
+            help="Enable multi-perspective analysis with parallel specialist agents.",
+        ),
+    ] = False,
+    agent_count: Annotated[
+        int | None,
+        typer.Option(
+            "--agent-count",
+            min=1,
+            max=4,
+            help="Number of final-analysis specialist agents to run (1-4). Implies --multi-perspective.",
+        ),
+    ] = None,
+    max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--max-workers",
+            min=1,
+            max=256,
+            help="Maximum concurrent workers PER FILE for summarize and stage-synthesis (1-256).",
+        ),
+    ] = None,
+    parallel: Annotated[
+        bool,
+        typer.Option(
+            "--parallel",
+            "-p",
+            help="Enable parallel processing of multiple files. Without this flag, files are processed sequentially.",
+        ),
+    ] = False,
+    batch_max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--batch-max-workers",
+            min=1,
+            max=64,
+            help="Maximum concurrent files to process in parallel batch mode (1-64). Only used with --parallel.",
+        ),
+    ] = None,
+) -> int:
+    """Run the hierarchical analysis pipeline on multiple text files.
+
+    This command processes multiple input files in batch mode, either sequentially
+    (default) or in parallel (with --parallel flag).
+
+    Input files can be specified via:
+    - Glob pattern: 'inputs/*.txt', 'docs/**/*.md'
+    - Comma-separated list: 'file1.txt,file2.txt,file3.txt'
+    - Single file (for convenience): 'single.txt'
+
+    Args:
+        input_pattern: Glob pattern or comma-separated list of input files.
+        config: Optional configuration file path.
+        mode: Analysis mode ('general' or 'relationship').
+        resume: Resume from checkpoints for each file.
+        multi_perspective: Enable specialist agents for each file.
+        agent_count: Number of specialist agents per file.
+        max_workers: Workers per file for internal async stages.
+        parallel: Enable parallel file processing.
+        batch_max_workers: Max concurrent files in parallel mode.
+
+    Returns:
+        int: Exit code (0 for all success, 1 for all failed, 2 for partial success)
+
+    Examples:
+        # Process all txt files sequentially
+        $ longtext batch 'inputs/*.txt'
+
+        # Process multiple files in parallel (up to 4 concurrent)
+        $ longtext batch 'inputs/*.txt' --parallel --batch-max-workers 4
+
+        # Process specific files with custom config
+        $ longtext batch 'doc1.txt,doc2.txt,doc3.txt' --config config.yaml
+
+        # Parallel batch with multi-perspective analysis
+        $ longtext batch '*.md' --parallel --batch-max-workers 2 --multi-perspective
+    """
+    from longtext_pipeline.utils.batch_processor import BatchProcessor
+
+    try:
+        # Expand input pattern to file list
+        input_files = _expand_input_pattern(input_pattern)
+
+        if not input_files:
+            typer.echo(f"Error: No files found matching '{input_pattern}'", err=True)
+            return 1
+
+        typer.echo(f"Found {len(input_files)} file(s) to process:")
+        for f in input_files:
+            typer.echo(f"  - {f}")
+        typer.echo()
+
+        # Build per-file config
+        per_file_config = {
+            "config": config,
+            "mode": mode,
+            "resume": resume,
+            "multi_perspective": multi_perspective or agent_count is not None,
+            "agent_count": agent_count,
+            "max_workers": max_workers,
+        }
+
+        # Create batch processor and run
+        processor = BatchProcessor(
+            parallel=parallel,
+            batch_max_workers=batch_max_workers or 1,
+        )
+
+        typer.echo(f"Starting batch processing (parallel={parallel})...")
+        if parallel and batch_max_workers:
+            typer.echo(f"Max concurrent files: {batch_max_workers}")
+        if max_workers:
+            typer.echo(f"Max workers per file: {max_workers}")
+        typer.echo()
+
+        results = processor.run_batch(input_files, per_file_config)
+
+        # Report results
+        successful = sum(1 for r in results if r["success"])
+        failed = len(results) - successful
+
+        typer.echo()
+        typer.echo("=" * 60)
+        typer.echo("BATCH PROCESSING COMPLETE")
+        typer.echo("=" * 60)
+        typer.echo(f"Total files: {len(results)}")
+        typer.echo(f"Successful: {successful}")
+        typer.echo(f"Failed: {failed}")
+        typer.echo()
+
+        if failed > 0:
+            typer.echo("Failed files:", err=True)
+            for r in results:
+                if not r["success"]:
+                    typer.echo(
+                        f"  - {r['file']}: {r.get('error', 'Unknown error')}", err=True
+                    )
+            typer.echo()
+
+        if successful == len(results):
+            typer.echo("[PASS] All files processed successfully")
+            return 0
+        elif successful > 0:
+            typer.echo("[PARTIAL] Some files processed successfully")
+            return 2
+        else:
+            typer.echo("[FAIL] All files failed to process")
+            return 1
+
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        return 1
+    except Exception as e:
+        logger.exception("Batch processing failed")
+        typer.echo(f"Batch processing failed: {e}", err=True)
+        return 1
+
+
+def _expand_input_pattern(pattern: str) -> list[str]:
+    """Expand input pattern (glob or comma-separated) to list of validated file paths.
+
+    Args:
+        pattern: Glob pattern (e.g., 'inputs/*.txt') or comma-separated list of files.
+
+    Returns:
+        List of absolute paths to existing files.
+
+    Raises:
+        FileNotFoundError: If no files are found.
+    """
+    import glob as glob_module
+
+    # Check if it's a comma-separated list
+    if "," in pattern:
+        files = [f.strip() for f in pattern.split(",") if f.strip()]
+        validated = []
+        for f in files:
+            path = Path(f).resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"File not found: {f}")
+            if not path.is_file():
+                raise ValueError(f"Not a file: {f}")
+            ext = path.suffix.lower()
+            if ext not in [".txt", ".md", ".pdf", ".docx"]:
+                raise ValueError(f"Unsupported file type '{ext}': {f}")
+            validated.append(str(path))
+        return validated
+
+    # Otherwise, treat as glob pattern
+    matched = glob_module.glob(pattern, recursive=True)
+
+    if not matched:
+        return []
+
+    validated = []
+    for f in matched:
+        path = Path(f).resolve()
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower()
+        if ext not in [".txt", ".md", ".pdf", ".docx"]:
+            continue
+        validated.append(str(path))
+
+    return validated
 
 
 @app.command()
@@ -296,6 +575,9 @@ def status(
 
         # Check status of pipeline for markdown file
         $ longtext status document.md
+
+        # Check status of pipeline for DOCX file
+        $ longtext status document.docx
     """
     try:
         # Step 1: Validate input file exists
@@ -308,11 +590,12 @@ def status(
             typer.echo(f"Error: Input path is not a file: {input_file}", err=True)
             return 1
 
-        # Check extension (only txt/md supported)
+        # Check extension (now including PDF and DOCX)
         ext = input_path.suffix.lower()
-        if ext not in [".txt", ".md"]:
+        if ext not in [".txt", ".md", ".pdf", ".docx"]:
             typer.echo(
-                f"Error: Unsupported file type '{ext}'. Supported: .txt, .md.", err=True
+                f"Error: Unsupported file type '{ext}'. Supported: .txt, .md, .pdf, .docx.",
+                err=True,
             )
             return 1
 
@@ -665,7 +948,7 @@ longtext status your_text_file.txt
 ## Configuration Types
 
 - **General Mode:** Standard analysis focused on understanding and summarizing content
-- **Relationship Mode:** Experimental mode focused on identifying connections and relationships between entities/concepts
+- **Relationship Mode:** Entity and relationship discovery mode
 
 ## Output Overview
 

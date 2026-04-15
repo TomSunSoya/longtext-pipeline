@@ -15,6 +15,7 @@ import time
 
 from ..errors import LLMError, StageFailedError
 from ..llm.factory import get_llm_client
+from ..llm.dispatcher import ParallelDispatcher, ParallelMode
 from ..llm.progress import print_final_streaming_stats
 from ..manifest import ManifestManager
 from ..models import Manifest, Part, Summary
@@ -80,6 +81,8 @@ class SummarizeStage:
         prompt_template: str,
         client,
         model: str,
+        config: dict,
+        mode: str,
         streaming_enabled: bool = False,
     ) -> Summary:
         """Generate summary for a single part.
@@ -88,8 +91,10 @@ class SummarizeStage:
             part: Part object to summarize
             part_path: Path to the part file
             prompt_template: Loaded prompt template
-            client: LLM client instance
+            client: Default LLM client instance (for backwards compatibility)
             model: Model name for metadata
+            config: Full configuration dictionary
+            mode: Analysis mode (general or relationship)
             streaming_enabled: Whether to use streaming interface for progress reporting
 
         Returns:
@@ -101,38 +106,92 @@ class SummarizeStage:
         # Build full prompt by appending part content
         full_prompt = prompt_template + part.content
 
-        # Call LLM to generate summary (async) - with optional streaming
-        if streaming_enabled and hasattr(client, "complete_stream"):
-            # Use streaming with progress tracking
-            start_time = time.time()
+        # Check if multi-provider configuration is available for this agent type (summarizer)
+        from ..config import get_agent_provider_configs
 
-            response = await client.complete_stream(
-                full_prompt,
-                on_chunk=client.default_progress_callback,
+        agent_provider_configs = get_agent_provider_configs(config, "summarizer")
+
+        # If we have multiple provider configurations, use parallel dispatcher
+        if len(agent_provider_configs) > 1:
+            # Create dispatcher with the configured providers
+            dispatcher = ParallelDispatcher()
+
+            # Determine mode based on config or default to PARALLEL
+            dispatch_mode = ParallelMode.PARALLEL
+            if config.get("model", {}).get("dispatch_mode") == "fastest":
+                dispatch_mode = ParallelMode.FASTEST
+            elif config.get("model", {}).get("dispatch_mode") == "ranked":
+                dispatch_mode = ParallelMode.RANKED
+
+            # Use system prompt based on mode
+            system_prompt = self._get_system_prompt_for_mode(mode)
+
+            # Execute dispatch
+            result = await dispatcher.dispatch(
+                prompt=full_prompt,
+                system_prompt=system_prompt,
+                mode=dispatch_mode,
+                provider_configs=agent_provider_configs,
             )
 
-            # Count tokens roughly - this won't be precise
-            total_tokens_estimate = len(response.split()) if response else 0
-
-            print_final_streaming_stats(time.time() - start_time, total_tokens_estimate)
+            # Choose content based on mode
+            content_to_use = result.primary_content if result.primary_content else ""
         else:
-            # Use standard completion
-            response = await client.acomplete(full_prompt)
+            # Use traditional single client approach for back compatibility
+            # Call LLM to generate summary (async) - with optional streaming
+            if streaming_enabled and hasattr(client, "complete_stream"):
+                # Use streaming with progress tracking
+                start_time = time.time()
+
+                response = await client.complete_stream(
+                    full_prompt,
+                    on_chunk=client.default_progress_callback,
+                )
+
+                # Count tokens roughly - this won't be precise
+                total_tokens_estimate = len(response.split()) if response else 0
+
+                print_final_streaming_stats(
+                    time.time() - start_time, total_tokens_estimate
+                )
+            else:
+                # Use standard completion
+                response = await client.acomplete(full_prompt)
+
+            content_to_use = response
 
         # Parse response into Summary object
         timestamp = datetime.now()
+
+        # Check if the agent_provider_configs represents a multi-provider response
+        if len(agent_provider_configs) > 1:
+            # Build model name that indicates multi-provider source
+            model_names = [cfg.get("name", "unknown") for cfg in agent_provider_configs]
+            model_desc = f"multi({','.join(model_names[:3])})" + (
+                "..." if len(model_names) > 3 else ""
+            )
+        else:
+            model_desc = model
+
         summary = Summary(
             part_index=part.index,
-            content=response,
+            content=content_to_use,
             metadata={
                 "generated_at": timestamp.isoformat(),
                 "part_file": part_path,
-                "model": model,
-                "estimated_tokens": estimate_tokens(response),
+                "model": model_desc,
+                "estimated_tokens": estimate_tokens(content_to_use),
             },
         )
 
         return summary
+
+    def _get_system_prompt_for_mode(self, mode: str) -> Optional[str]:
+        """Get appropriate system prompt based on mode."""
+        if mode == "relationship":
+            return "You are analyzing the text for relationships between entities, people, organizations, and concepts. Focus on identifying key connections and dependencies."
+        else:
+            return "You are analyzing the text for key themes, concepts, and information. Extract the most important points and summarize them comprehensively."
 
     def _save_summary(self, summary: Summary, parts_dir: Path) -> str:
         """Save summary to file and return path.
@@ -206,17 +265,29 @@ _Summary generated by {model} ({timestamp})_
         # Load prompt template
         prompt_template = self._load_prompt_template(mode)
 
-        # Create LLM client using agent-specific model config for summarizer
-        client = get_llm_client(config, agent_type="summarizer")
-        model = getattr(client, "model", "unknown")
-
-        # Determine output directory
-        output_dir = Path(manifest.input_path).parent / ".longtext"
-        output_dir.mkdir(exist_ok=True)
+        # Determine output directory from config or use default .longtext/
+        output_dir_config = config.get("output", {}).get("dir")
+        if output_dir_config:
+            # Use configured output directory
+            output_dir = Path(output_dir_config) / ".longtext"
+        else:
+            # Default: adjacent .longtext/ directory
+            output_dir = Path(manifest.input_path).parent / ".longtext"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Get max workers from config
         max_workers = config.get("pipeline", {}).get("max_workers", 4)
         semaphore = asyncio.Semaphore(max_workers)
+
+        needs_llm = any(not part.metadata.get("skip_summary", False) for part in parts)
+        if needs_llm:
+            # Create LLM client using agent-specific model config for summarizer
+            # Keep the default client for backward compatibility
+            client = get_llm_client(config, agent_type="summarizer")
+            model = getattr(client, "model", "unknown")
+        else:
+            client = None
+            model = "local-skip"
 
         # Track results and errors
         summaries: List[Summary] = []
@@ -231,6 +302,8 @@ _Summary generated by {model} ({timestamp})_
                     reason = part.metadata.get("reason", "Unknown")
                     logger.info("Skipping part %s: %s", part.index, reason)
 
+                    part_filename = f"part_{part.index:02d}.txt"
+                    part_path = output_dir / part_filename
                     # Create empty summary for skipped parts
                     summary = Summary(
                         part_index=part.index,
@@ -239,9 +312,14 @@ _Summary generated by {model} ({timestamp})_
                             "skipped": True,
                             "skip_reason": reason,
                             "generated_at": datetime.now().isoformat(),
+                            "part_file": str(part_path),
+                            "mode": mode,
+                            "model": "local-skip",
+                            "estimated_tokens": estimate_tokens("[Skipped - tiny input]"),
                         },
                     )
-                    return summary, "", None  # Success, summary, path, no error
+                    summary_path = self._save_summary(summary, output_dir)
+                    return summary, summary_path, None  # Success, summary, path, no error
 
                 # Construct part file path
                 part_filename = f"part_{part.index:02d}.txt"
@@ -257,6 +335,8 @@ _Summary generated by {model} ({timestamp})_
                         prompt_template=prompt_template,
                         client=client,
                         model=model,
+                        config=config,
+                        mode=mode,
                         streaming_enabled=config.get("pipeline", {}).get(
                             "use_streaming", False
                         ),  # Allow config control
@@ -328,6 +408,7 @@ _Summary generated by {model} ({timestamp})_
             "summaries_skipped": skipped,
             "errors": errors,
             "saved_summaries": saved_summary_paths,
+            "output_dir_used": str(output_dir),
         }
 
         # Determine stage status

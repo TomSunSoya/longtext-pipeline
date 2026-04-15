@@ -11,7 +11,13 @@ Available on the root command:
 
 ## `longtext run <input-file>`
 
-Run the full analysis pipeline on a `.txt` or `.md` file.
+Run the full analysis pipeline on a single input file.
+
+### Supported inputs
+
+For end-to-end manual runs, prefer `.txt` and `.md`.
+
+The repository also contains `.pdf` and `.docx` extraction code, and some CLI validators already accept those extensions, but the full orchestration path is still being normalized. If you want the least surprising behavior, use text or markdown.
 
 ### Flags
 
@@ -39,6 +45,46 @@ longtext run input.txt --multi-perspective --agent-count 3
 longtext run input.txt --max-workers 2
 ```
 
+## `longtext batch <input-pattern>`
+
+Run the pipeline on multiple files.
+
+Input can be provided as:
+
+- a glob pattern such as `"inputs/*.txt"`
+- a recursive glob such as `"docs/**/*.md"`
+- a comma-separated list such as `"a.txt,b.txt,c.txt"`
+
+### Flags
+
+- `--config`, `-c PATH`: Load an explicit YAML config file
+- `--mode`, `-m TEXT`: `general` or `relationship`
+- `--resume`, `-r`: Resume each file from its manifest when possible
+- `--multi-perspective`, `-mp`: Enable specialist-agent synthesis per file
+- `--agent-count INT`: Number of specialist agents per file, `1-4`
+- `--max-workers INT`: Max concurrent summarize/stage workers per file, `1-256`
+- `--parallel`, `-p`: Process multiple files concurrently
+- `--batch-max-workers INT`: Max concurrent files in parallel mode, `1-64`
+
+### Exit codes
+
+- `0`: All files succeeded
+- `1`: All files failed
+- `2`: Partial success
+
+### Examples
+
+```bash
+longtext batch "inputs/*.txt"
+longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
+longtext batch "doc1.txt,doc2.txt,doc3.txt" --config config.yaml
+longtext batch "*.md" --parallel --batch-max-workers 2 --multi-perspective
+```
+
+### Batch caveat
+
+If you force many files to share the same explicit `output.dir`, generated artifacts can land in the same `.longtext/` directory. The safest batch layout is still the default per-input adjacent output.
+
 ## `longtext status <input-file>`
 
 Show the current manifest-driven status for a previous or in-progress run.
@@ -49,7 +95,7 @@ Show the current manifest-driven status for a previous or in-progress run.
 longtext status input.txt
 ```
 
-The command reads `.longtext/manifest.json` next to the input file and renders a human-readable summary.
+The command reads the manifest associated with the input file. In the current implementation, manifest lookup still uses the input-local `.longtext/manifest.json`, even when generated stage artifacts were redirected with `output.dir`.
 
 ## `longtext init`
 
@@ -75,7 +121,9 @@ longtext init --dir ./demo-project
 
 ## Output layout
 
-The live runtime writes working files next to the input file in a `.longtext/` directory:
+### Default
+
+Without `output.dir`, the runtime writes working files next to the input file in a `.longtext/` directory:
 
 ```text
 .longtext/
@@ -88,8 +136,15 @@ The live runtime writes working files next to the input file in a `.longtext/` d
 └── .locks/
 ```
 
+### With `output.dir`
+
+When `output.dir` is configured for a standard single-file run:
+
+- part, summary, stage, final-analysis, and metrics files go to `<output.dir>/.longtext/`
+- manifest and `.locks/` remain beside the input file in its local `.longtext/`
+
 ## Current caveats
 
-- Relationship mode is usable today, but some logs and prompt paths still describe it as experimental.
-- The runtime output location is currently fixed to `.longtext/` beside the input file.
-- The `output` block in config exists, but it is not yet enforced uniformly by every stage.
+- Audit is active and no longer just a skipped placeholder stage.
+- The safest manual input types are still `.txt` and `.md`.
+- `status` is manifest-based, so it follows the input-local manifest rather than the redirected artifact directory.

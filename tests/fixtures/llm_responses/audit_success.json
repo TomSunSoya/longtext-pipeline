@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_009_audit_success",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 600,
+    "completion_tokens": 200,
+    "total_tokens": 800,
+    "timestamp": "2026-04-14T11:00:00Z",
+    "response": {
+        "content": "# Audit Report\n\n## Processing Quality Check\n\n### Validation Results: PASSED\n\n| Check | Status | Details |\n|-------|--------|-------|\n| Content Extraction | PASS | 98% of text extracted successfully |\n| Structure Detection | PASS | All headers properly identified |\n| Table Parsing | PASS | 4 tables detected, 2 partially parsed |\n| Figure Detection | PASS | 3 figures identified |\n| Page Numbering | WARNING | Missing page 17 in some sources |\n| Encoding | PASS | UTF-8 validation passed |\n\n### Hallucination Check\n\n| Category | Count | Status |\n|----------|-------|-------|\n| Factual Errors | 0 | Low |\n| Misinterpretation | 1 | Minor |\n| Inconsistent Citations | 0 | Low |\n| Overreach Claims | 0 | Low |\n\nOverall Hallucination Risk: LOW (2/10)\n\n### Recommendations\n1. Verify source document integrity for page 17\n2. Screen capture of figure 3 recommended for verification\n3. Consider manual review of section 4.2\n\n---\n*Audit completed in 3.2 seconds*\n*Total documents processed: 1*\n*Total chunks analyzed: 25*",
+        "finish_reason": "stop",
+        "logprobs": null
+    }
+}

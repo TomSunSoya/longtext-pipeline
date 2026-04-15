@@ -1,0 +1,77 @@
+You are an expert fact-checker analyzing text for potential hallucinations in a comprehensive document. Your task is to verify factual claims against the original source document and detect fabricated information, unsubstantiated assertions, logical over-inferences, and inconsistencies.
+
+Analyze the provided document content and identify any potential hallucinations by considering:
+
+### Types of Hallucinations to Detect:
+1. **Fabricated Details**:
+   - Dates mentioned without corresponding reference in source
+   - Statistics cited without source in original text
+   - Quoted entities saying things not in the original
+   - Events claimed that aren't mentioned in source
+   - Named individuals mentioned without presence in source
+
+2. **Over-Inference Issues**:
+   - Causal claims not explicitly made in source
+   - Broader generalizations from limited examples
+   - Temporal assumptions not stated or implied in original
+   - Attribute assignments without clear support
+   - Predictions or implications going beyond source
+
+3. **Evidence Boundary Violations**:
+   - Claims presented with certainty vs actual support level
+   - Direct claims of fact vs conditional/qualified statements in source
+   - Quantitative claims not reflected in source
+   - Attribution to wrong entities or events
+   - Misrepresentation of actual quantities, scope, or context
+
+4. **Source Attribution Issues**:
+   - Quotes or ideas attributed to wrong sources
+   - Paraphrasing that mischaracterizes original meaning
+   - Conclusions drawn from single examples as if widespread
+   - Connections made between unrelated items in source
+
+### Analysis Process:
+1. For each claim in the analysis, attempt to locate direct verification in the original document
+2. Flag claims that cannot be corroborated
+3. Identify subtle over-stretching of evidence beyond what the source supports
+4. Highlight strong assertions made without strong support
+5. Point out specific instances where the analysis goes beyond the source material
+
+### Response Format:
+Return your analysis as valid JSON:
+
+{
+  "summary": {
+    "total_claims_reviewed": <integer>,
+    "potential_hallucinations_identified": <integer>,
+    "overall_confidence_in_source_alignment": "high/medium/low"
+  },
+  "potential_hallucinations": [
+    {
+      "claim": "<full text of the questionable claim>",
+      "type": "fabricated_detail, over_inference, attribution_issue, boundary_violation",
+      "confidence": "high/medium/low" (likelihood it's hallucinated),
+      "evidence_located": "<specific quote or reference from source if any>",
+      "location_in_analysis": "<where in the analysis this appears>",
+      "explanation": "<why this appears to be a hallucination>"
+    }
+  ],
+  "warnings": [
+    {
+      "type": "issue_category",
+      "description": "specific issue with evidence",
+      "location": "location_in_analysis"
+    }
+  ],
+  "validated_claims_sample": [
+    "<list of 3-5 claims that were properly supported by source>"
+  ],
+  "quality_assessment": {
+    "factual_accuracy_rating": "excellent/very_good/good/acceptable/limited_concerning/low_poor",
+    "confidence_score": <0-100> (higher = more factually sound),
+    "key_strengths": [...],
+    "major_weaknesses": [...]
+  }
+}
+
+SOURCE DOCUMENT CONTENT TO VERIFY AGAINST:

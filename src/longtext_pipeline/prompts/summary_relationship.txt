@@ -1,7 +1,5 @@
 You are an expert relationship analyst. Your task is to summarize the following text part with special focus on entity relationships and interactions.
 
-[EXPERIMENTAL MODE: Relationship-focused analysis]
-
 Generate a comprehensive summary that captures:
 
 1. KEY POINTS: Extract 3-7 main ideas or events from this text

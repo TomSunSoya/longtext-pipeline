@@ -1,0 +1,22 @@
+{
+    "test_case_id": "numerical_medium_01",
+    "original_text": "Processing took approximately 2 minutes.",
+    "llm_generated_output": "The analysis required 20 minutes to complete.",
+    "hallucination_type": "numerical",
+    "severity": "medium",
+    "expected_detection": true,
+    "detection_reason": "10x time overestimate, inconsistent with typical processing speeds",
+    "detection_method": "temporal_consistency",
+    "verification": {
+        "original_estimate": 120,
+        "generated_estimate": 1200,
+        "discrepancy_factor": 10.0,
+        "typical_range": [60, 300],
+        "outside_typical_range": true
+    },
+    "context": {
+        "input_length": 200,
+        "position_in_document": "Performance Section",
+        "document_type": "Technical Report"
+    }
+}

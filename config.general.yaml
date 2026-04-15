@@ -1,0 +1,78 @@
+agents:
+  analyst:
+    model: null
+  auditor:
+    model: null
+  entity_analyst:
+    model: null
+  sentiment_analyst:
+    model: null
+  stage_synthesizer:
+    model: null
+  summarizer:
+    model: null
+  timeline_analyst:
+    model: null
+  topic_analyst:
+    model: null
+input:
+  encoding: utf-8
+  file_path: YOUR_INPUT_FILE.txt
+logging:
+  file: null
+  format: text
+  level: INFO
+model:
+  api_key: ${OPENAI_API_KEY}
+  base_url: null
+  context_window: 128000
+  dispatch_mode: parallel
+  name: gpt-4o-mini
+  provider: openai
+  providers:
+    default:
+      api_key: null
+      base_url: null
+      name: gpt-4o-mini
+      provider: openai
+      temperature: 0.7
+      timeout: 120.0
+  temperature: 0.7
+  timeout: 120.0
+ocr:
+  api_failures_before_fallback: 1
+  enabled: false
+  paddle_api_token: null
+  paddle_api_url: https://kbierdt4sav0zbee.aistudio-app.com/layout-parsing
+  threshold_token_ratio: 0.05
+  use_local_fallback: true
+output:
+  dir: ./output
+  naming:
+    final_filename: final_analysis.md
+    stage_prefix: stage_
+    summarize_prefix: summary_
+  save_intermediate: true
+pipeline:
+  allow_resume: true
+  audit_enabled: true
+  max_workers: 4
+  specialist_count: 4
+prompts:
+  dir: C:\Users\localuser\Documents\longtext\src\longtext_pipeline\prompts
+  format: general
+stages:
+  audit:
+    enabled: true
+    prompt_template: prompts/audit_general.txt
+  final:
+    prompt_template: prompts/final_general.txt
+  ingest:
+    chunk_size: 4000
+    overlap_rate: 0.1
+  stage:
+    group_size: 5
+    prompt_template: prompts/stage_general.txt
+  summarize:
+    batch_size: 4
+    prompt_template: prompts/summary_general.txt

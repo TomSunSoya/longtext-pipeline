@@ -1,0 +1,22 @@
+{
+    "test_case_id": "factual_high_01",
+    "original_text": "The experiment used a sample of 25 participants.",
+    "llm_generated_output": "The study involved 2,500 participants across three institutions.",
+    "hallucination_type": "factual",
+    "severity": "high",
+    "expected_detection": true,
+    "detection_reason": "Order-of-magnitude exaggeration (100x increase)",
+    "detection_method": "numerical_verification",
+    "verification": {
+        " extraction_confidence": 0.95,
+        "expected_value": 25,
+        "generated_value": 2500,
+        "discrepancy_ratio": 100.0,
+        "threshold_violated": true
+    },
+    "context": {
+        "input_length": 100,
+        "position_in_document": "Results Section",
+        "supporting_evidence": "Raw data file shows 25 entries"
+    }
+}

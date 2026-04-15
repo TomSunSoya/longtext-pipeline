@@ -1,0 +1,26 @@
+{
+    "request_id": "resp_010_audit_streaming",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 600,
+    "completion_tokens": 200,
+    "total_tokens": 800,
+    "timestamp": "2026-04-14T11:05:00Z",
+    "chunks": [
+        {
+            "delta": {"role": "assistant", "content": "# Audit Re"},
+            "timestamp": "2026-04-14T11:05:00.100Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "port\n\n## Process"},
+            "timestamp": "2026-04-14T11:05:00.200Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "ing Quality Check\n\n### Validation Res"},
+            "timestamp": "2026-04-14T11:05:00.300Z"
+        },
+        {
+            "delta": {"role": "assistant", "content": "ults: PASSED\n\nAll checks passed successfully."},
+            "timestamp": "2026-04-14T11:05:00.400Z"
+        }
+    ]
+}

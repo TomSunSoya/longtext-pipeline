@@ -14,12 +14,15 @@ A Python CLI tool for hierarchical analysis of super-long texts using LLMs.
 - **Hierarchical processing**: 5-stage pipeline (Ingest → Summarize → Stage → Final → Audit)
 - **Resumable**: SHA-256-based checkpoint/resume — pick up where you left off
 - **Continue-with-Partial**: Pipeline continues with available results when individual parts fail
+- **Active audit stage**: Hallucination, timeline, and quality checks with heuristic fallback when no API-backed auditor is available
 - **Token budget management**: Automatic context window validation and prompt truncation
 - **Streaming**: Real-time token streaming with progress callbacks
 - **Cross-process locking**: File-level locking prevents concurrent runs on the same input
+- **Batch processing**: Sequential or parallel multi-file execution via `longtext batch`
 - **Observability**: Prometheus metrics, structured JSON logging, configurable log sinks
 - **Dual modes**: General analysis and relationship-focused analysis
 - **Multi-perspective**: Parallel specialist agents for richer final synthesis
+- **Multi-provider routing**: Optional provider registry, parallel dispatch, and ranked result selection
 - **Model-agnostic**: Any OpenAI-compatible API endpoint (OpenAI, OpenRouter, Ollama, vLLM, etc.)
 - **Docker-ready**: Multi-stage Dockerfile with non-root user
 
@@ -95,6 +98,9 @@ longtext run input.txt --multi-perspective --agent-count 3
 
 # Control concurrency
 longtext run input.txt --max-workers 2
+
+# Process multiple files
+longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
 ```
 
 ### 3. Check results
@@ -103,8 +109,11 @@ longtext run input.txt --max-workers 2
 # View processing status
 longtext status input.txt
 
-# Read the final analysis
+# Read the final analysis (default output layout)
 cat .longtext/final_analysis.md
+
+# If config.output.dir is set, stage artifacts are written there instead
+cat /path/to/output/.longtext/final_analysis.md
 ```
 
 ## CLI Commands
@@ -129,6 +138,20 @@ Options:
   --help                      Show all options
 ```
 
+`longtext run` is currently most reliable for `.txt` and `.md` inputs. The repository also contains PDF and DOCX extraction code, but end-to-end exposure for those formats is still being normalized across validators and orchestration paths.
+
+### `longtext batch`
+
+Process multiple files with the same runtime options.
+
+```bash
+longtext batch "inputs/*.txt"
+longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
+longtext batch "doc1.txt,doc2.txt,doc3.txt" --config config.yaml
+```
+
+Batch mode can run files sequentially or in parallel. Each file still goes through the same five-stage single-file pipeline.
+
 ### `longtext status`
 
 Check processing status and manifest state.
@@ -147,7 +170,7 @@ longtext init [--dir PATH]
 
 ## Output Structure
 
-Processing creates a `.longtext/` directory alongside the input file:
+By default, processing creates a `.longtext/` directory alongside the input file:
 
 ```
 .longtext/
@@ -161,6 +184,10 @@ Processing creates a `.longtext/` directory alongside the input file:
 ├── metrics.prom           # Prometheus metrics
 └── .locks/                # Cross-process lock files
 ```
+
+If `output.dir` is configured, part, summary, stage, final-analysis, and metrics files are written to `<output.dir>/.longtext/` instead.
+
+Manifest and lock files still remain next to the input file because resume and `longtext status` are keyed off the input-local `.longtext/manifest.json`.
 
 ## Configuration
 
@@ -212,9 +239,11 @@ export LONGTEXT_LOG_FILE="./pipeline.log"
 
 Create `longtext.local.yaml` in the working directory for secrets and local provider settings. This file is auto-discovered and should not be committed.
 
-### Current limitation
+### Known caveats
 
-The runtime currently writes working files next to the input file in `.longtext/`. The `output` section remains in the config schema, but it is not yet enforced uniformly by every stage.
+- `output.dir` is honored by the standard pipeline stages for generated artifacts, but manifest and lock files still live beside the input file.
+- The codebase includes PDF and DOCX extraction support, but the safest manual `run` path today remains `.txt` and `.md`.
+- In batch mode, pointing many files at the same explicit `output.dir` can mix artifacts in one shared `.longtext/` directory because outputs are not namespaced per input.
 
 ## Modes
 
@@ -233,8 +262,6 @@ Entity and relationship-focused analysis for network mapping. Best for organizat
 ```bash
 longtext run transcript.txt --mode relationship
 ```
-
-Relationship mode is available today, but some prompt sets and warnings still treat it as experimental.
 
 ## Resume
 
@@ -336,7 +363,7 @@ docker compose run longtext run /data/input.txt
 3. **Summarize** generates summaries for each chunk via LLM (async, concurrent workers)
 4. **Stage** groups summaries (default 5 per group) and synthesizes (async)
 5. **Final** synthesizes all stage summaries into one analysis (async, optional multi-perspective)
-6. **Audit** post-processing quality check (placeholder in v1)
+6. **Audit** checks hallucinations, timeline consistency, and quality metrics, with offline heuristics as fallback
 7. **Manifest** tracks state throughout for resume capability
 
 ## Troubleshooting

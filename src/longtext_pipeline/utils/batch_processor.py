@@ -1,8 +1,13 @@
-"""Batch processing utility for parallel file processing."""
+"""Batch processing utility for parallel file processing.
+
+Provides namespace isolation to prevent output conflicts when processing
+multiple files from the same directory.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +19,43 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..manifest import ManifestManager
+
+_LEGACY_FILE_CONFIG_KEYS = frozenset(
+    {
+        "config",
+        "mode",
+        "resume",
+        "multi_perspective",
+        "agent_count",
+        "max_workers",
+        "output_dir",
+    }
+)
+
+
+def create_namespace_for_file(input_path: str) -> str:
+    """Create a unique namespace identifier for an input file.
+
+    Uses a combination of the input file stem and a short hash of the
+    full path to ensure uniqueness while remaining human-readable.
+
+    Args:
+        input_path: Absolute path to the input file.
+
+    Returns:
+        Namespace string suitable for use as a subdirectory name.
+
+    Examples:
+        >>> create_namespace_for_file("/data/report.txt")
+        'report_a1b2c3d4'
+        >>> create_namespace_for_file("/data/report.md")
+        'report_e5f6g7h8'
+    """
+    path = Path(input_path).resolve()
+    stem = path.stem
+    # Create short hash from full path to avoid collisions
+    path_hash = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:8]
+    return f"{stem}_{path_hash}"
 
 
 @dataclass
@@ -78,7 +120,14 @@ class BatchProcessor:
 
         Args:
             input_files: List of absolute paths to input files.
-            per_file_config: Configuration dict to pass to each pipeline run.
+            per_file_config: Configuration dict keyed by file path. Each value dict contains:
+                - config: Optional config file path
+                - mode: Analysis mode
+                - resume: Resume flag
+                - multi_perspective: Multi-perspective flag
+                - agent_count: Number of specialist agents
+                - max_workers: Workers for internal async stages
+                - output_dir: Namespaced output directory for this specific file
             progress_reporter: Optional ProgressReporter for real-time progress updates.
             progress_tracker: Optional ProgressTracker for writing progress to JSON file.
 
@@ -101,6 +150,29 @@ class BatchProcessor:
                 input_files, per_file_config, progress_reporter, progress_tracker
             )
 
+    def _get_file_config(
+        self, file_path: str, per_file_config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Resolve the config for a single file.
+
+        The batch CLI now passes a dict keyed by absolute input path. Preserve
+        compatibility with the older flat config shape, but fail loudly when a
+        namespaced config is missing an entry for one of the requested files.
+        """
+        if file_path in per_file_config:
+            file_config = per_file_config[file_path]
+            if not isinstance(file_config, dict):
+                raise TypeError(
+                    f"Batch config for {file_path} must be a dict, got "
+                    f"{type(file_config).__name__}"
+                )
+            return file_config
+
+        if set(per_file_config).issubset(_LEGACY_FILE_CONFIG_KEYS):
+            return per_file_config
+
+        raise KeyError(f"Missing batch config for input file: {file_path}")
+
     def _run_sequential(
         self,
         input_files: list[str],
@@ -112,7 +184,7 @@ class BatchProcessor:
 
         Args:
             input_files: List of file paths to process.
-            per_file_config: Configuration for each pipeline run.
+            per_file_config: Configuration dict keyed by file path with settings for each run.
             progress_reporter: Optional ProgressReporter for real-time updates.
             progress_tracker: Optional ProgressTracker for writing progress to JSON.
 
@@ -130,7 +202,9 @@ class BatchProcessor:
 
             logger.info("Processing file %d/%d: %s", i, len(input_files), file_path)
 
-            result = self._process_single_file(file_path, per_file_config)
+            # Get per-file configuration
+            file_config = self._get_file_config(file_path, per_file_config)
+            result = self._process_single_file(file_path, file_config)
             results.append(result)
 
             # Update progress after processing
@@ -167,7 +241,7 @@ class BatchProcessor:
 
         Args:
             input_files: List of file paths to process.
-            per_file_config: Configuration for each pipeline run.
+            per_file_config: Configuration dict keyed by file path with settings for each run.
             progress_reporter: Optional ProgressReporter for real-time updates.
             progress_tracker: Optional ProgressTracker for writing progress to JSON.
 
@@ -187,10 +261,12 @@ class BatchProcessor:
                     progress_tracker.record_file_start(file_path)
 
                 logger.info("Starting parallel processing: %s", file_path)
+                # Get per-file configuration
+                file_config = self._get_file_config(file_path, per_file_config)
                 # Run sync pipeline in executor to not block event loop
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(
-                    None, self._process_single_file, file_path, per_file_config
+                    None, self._process_single_file, file_path, file_config
                 )
                 logger.info(
                     "Completed %s: success=%s",
@@ -211,15 +287,11 @@ class BatchProcessor:
                     )
                 return result
 
-        async with asyncio.TaskGroup() as tg:
-            tasks = [
-                tg.create_task(process_with_semaphore(file_path))
-                for file_path in input_files
-            ]
-
-        # Collect results from completed tasks
-        for task in tasks:
-            results.append(task.result())
+        tasks = [
+            asyncio.create_task(process_with_semaphore(file_path))
+            for file_path in input_files
+        ]
+        results.extend(await asyncio.gather(*tasks))
 
         return results
 
@@ -239,6 +311,7 @@ class BatchProcessor:
                 - multi_perspective: Multi-perspective flag
                 - agent_count: Number of specialist agents
                 - max_workers: Workers for internal async stages
+                - output_dir: Optional per-file output directory override
 
         Returns:
             Result dictionary with success status and metadata.
@@ -269,6 +342,8 @@ class BatchProcessor:
 
             pipeline = LongtextPipeline()
 
+            output_dir = per_file_config.get("output_dir")
+
             final_analysis = pipeline.run(
                 input_path=file_path,
                 config_path=per_file_config.get("config"),
@@ -277,9 +352,10 @@ class BatchProcessor:
                 multi_perspective=per_file_config.get("multi_perspective", False),
                 specialist_count=per_file_config.get("agent_count"),
                 max_workers=per_file_config.get("max_workers"),
+                output_dir_override=output_dir,
             )
 
-            # Construct manifest path
+            # Construct manifest path (always input-adjacent)
             manifest_path = str(Path(file_path).parent / ".longtext" / "manifest.json")
 
             status = (

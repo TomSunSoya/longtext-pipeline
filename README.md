@@ -18,7 +18,7 @@ A Python CLI tool for hierarchical analysis of super-long texts using LLMs.
 - **Token budget management**: Automatic context window validation and prompt truncation
 - **Streaming**: Real-time token streaming with progress callbacks
 - **Cross-process locking**: File-level locking prevents concurrent runs on the same input
-- **Batch processing**: Sequential or parallel multi-file execution via `longtext batch`
+- **Batch processing**: Sequential or parallel multi-file execution via `longtext batch`, with per-input output namespaces when artifacts are redirected
 - **Observability**: Prometheus metrics, structured JSON logging, configurable log sinks
 - **Dual modes**: General analysis and relationship-focused analysis
 - **Multi-perspective**: Parallel specialist agents for richer final synthesis
@@ -84,6 +84,10 @@ $env:LONGTEXT_MODEL_NAME="your-model-name"
 # Basic usage — analyze a text file
 longtext run input.txt
 
+# PDF or Word documents
+longtext run document.pdf
+longtext run report.docx
+
 # With a config file
 longtext run input.txt --config examples/config.general.yaml
 
@@ -109,10 +113,10 @@ longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
 # View processing status
 longtext status input.txt
 
-# Read the final analysis (default output layout)
-cat .longtext/final_analysis.md
+# Read the final analysis (built-in default output layout)
+cat output/.longtext/final_analysis.md
 
-# If config.output.dir is set, stage artifacts are written there instead
+# If output.dir is customized, generated artifacts are written there instead
 cat /path/to/output/.longtext/final_analysis.md
 ```
 
@@ -126,7 +130,7 @@ Execute the full pipeline on an input file.
 longtext run <input-file> [OPTIONS]
 
 Arguments:
-  <input-file>                Path to input .txt or .md file
+  <input-file>                Path to input file (.txt, .md, .pdf, .docx)
 
 Options:
   --config, -c PATH           YAML config file
@@ -138,7 +142,7 @@ Options:
   --help                      Show all options
 ```
 
-`longtext run` is currently most reliable for `.txt` and `.md` inputs. The repository also contains PDF and DOCX extraction code, but end-to-end exposure for those formats is still being normalized across validators and orchestration paths.
+`longtext run` supports `.txt`, `.md`, `.pdf`, and `.docx` inputs. PDF and DOCX files are extracted to text before processing.
 
 ### `longtext batch`
 
@@ -170,22 +174,28 @@ longtext init [--dir PATH]
 
 ## Output Structure
 
-By default, processing creates a `.longtext/` directory alongside the input file:
+With the built-in defaults, generated artifacts are written to `./output/.longtext/`:
 
 ```
-.longtext/
+output/.longtext/
 ├── part_001.txt           # Split input chunks
 ├── part_002.txt
 ├── summary_001.md         # Per-chunk LLM summaries
 ├── summary_002.md
 ├── stage_001.md           # Aggregated stage summaries
 ├── final_analysis.md      # Final synthesized analysis
+└── metrics.prom           # Prometheus metrics
+```
+
+Manifest and lock files still remain next to the input file:
+
+```
+.longtext/
 ├── manifest.json          # Processing state & checkpoint data
-├── metrics.prom           # Prometheus metrics
 └── .locks/                # Cross-process lock files
 ```
 
-If `output.dir` is configured, part, summary, stage, final-analysis, and metrics files are written to `<output.dir>/.longtext/` instead.
+If `output.dir` is configured, single-file runs write generated artifacts to `<output.dir>/.longtext/` instead. In batch mode, each input gets its own namespaced subdirectory under the configured base output directory, for example `<output.dir>/report_a1b2c3d4/.longtext/`.
 
 Manifest and lock files still remain next to the input file because resume and `longtext status` are keyed off the input-local `.longtext/manifest.json`.
 
@@ -242,8 +252,7 @@ Create `longtext.local.yaml` in the working directory for secrets and local prov
 ### Known caveats
 
 - `output.dir` is honored by the standard pipeline stages for generated artifacts, but manifest and lock files still live beside the input file.
-- The codebase includes PDF and DOCX extraction support, but the safest manual `run` path today remains `.txt` and `.md`.
-- In batch mode, pointing many files at the same explicit `output.dir` can mix artifacts in one shared `.longtext/` directory because outputs are not namespaced per input.
+- In batch mode, a shared explicit `output.dir` is safe for generated artifacts because each input gets a namespaced subdirectory under the configured base output directory.
 
 ## Modes
 

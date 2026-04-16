@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ class ProgressTracker:
         known_files = set(progress_data.get("files_in_progress", []))
         known_files.update(progress_data.get("files_processed", []))
         known_files.update(progress_data.get("files_failed", []))
-        return max(progress_data.get("total_files", 0), len(known_files))
+        return max(cast(int, progress_data.get("total_files", 0)), len(known_files))
 
     def _load_current(self) -> dict[str, Any]:
         """Load current progress data, return empty structure if file doesn't exist."""
@@ -327,13 +327,21 @@ class ProgressTracker:
                         for item in progress["files_failed"]
                     ]
                 progress.setdefault("total_files", self._infer_total_files(progress))
-                progress.setdefault("processed_files", len(progress.get("files_processed", [])) + len(progress.get("files_failed", [])))
-                progress.setdefault("successful", len(progress.get("files_processed", [])))
+                progress.setdefault(
+                    "processed_files",
+                    len(progress.get("files_processed", []))
+                    + len(progress.get("files_failed", [])),
+                )
+                progress.setdefault(
+                    "successful", len(progress.get("files_processed", []))
+                )
                 progress.setdefault("failed", len(progress.get("files_failed", [])))
-                progress.setdefault("in_progress", len(progress.get("files_in_progress", [])))
+                progress.setdefault(
+                    "in_progress", len(progress.get("files_in_progress", []))
+                )
                 progress.setdefault("elapsed_seconds", 0)
                 progress.setdefault("success_rate", 0.0)
-                return progress
+                return cast(dict[str, Any], progress)
         except (json.JSONDecodeError, IOError):
             return {
                 "total_files": 0,

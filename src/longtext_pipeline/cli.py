@@ -51,7 +51,7 @@ def run(
         str,
         typer.Argument(
             ...,
-            help="Path to the input text file (.txt, .md, or .docx) to be analyzed.",
+            help="Path to the input text file (.txt, .md, .pdf, or .docx) to be analyzed.",
         ),
     ],
     config: Annotated[
@@ -111,7 +111,7 @@ def run(
     Ingest → Summarize → Stage → Final → Audit
 
     Args:
-        input_file: Path to the input text file (.txt, .md, or .docx) to be analyzed.
+        input_file: Path to the input text file (.txt, .md, .pdf, or .docx) to be analyzed.
         config: Optional configuration file path. If not provided, uses default
             configuration or falls back to environment variables.
         mode: Select analysis type. 'general' for standard analysis, 'relationship'
@@ -128,37 +128,8 @@ def run(
         # With custom config
         $ longtext run input.md --config /path/to/config.yaml
 
-        # DOCX file support
-        $ longtext run document.docx
-
-        # Resume interrupted analysis
-        $ longtext run input.txt --resume
-
-        # Run with relationship-focused mode
-        $ longtext run input.md --mode relationship
-    """
-    """Run the hierarchical analysis pipeline on a text file.
-
-    This is the main command that orchestrates the five-stage processing flow:
-    Ingest → Summarize → Stage → Final → Audit
-
-    Args:
-        input_file: Path to the input text file (.txt, .md, or .docx) to be analyzed.
-        config: Optional configuration file path. If not provided, uses default
-            configuration or falls back to environment variables.
-        mode: Select analysis type. 'general' for standard analysis, 'relationship'
-            for entity relationship discovery.
-        resume: Resume from existing manifest checkpoint if processing was interrupted.
-
-    Returns:
-        int: Exit code (0 for success, 1 for error, 2 for partial success)
-
-    Examples:
-        # Basic usage
-        $ longtext run input.txt
-
-        # With custom config
-        $ longtext run input.md --config /path/to/config.yaml
+        # PDF file support
+        $ longtext run document.pdf
 
         # DOCX file support
         $ longtext run document.docx
@@ -421,7 +392,10 @@ def batch(
         # Parallel batch with multi-perspective analysis
         $ longtext batch '*.md' --parallel --batch-max-workers 2 --multi-perspective
     """
-    from longtext_pipeline.utils.batch_processor import BatchProcessor
+    from longtext_pipeline.utils.batch_processor import (
+        BatchProcessor,
+        create_namespace_for_file,
+    )
 
     try:
         # Expand input pattern to file list
@@ -436,15 +410,44 @@ def batch(
             typer.echo(f"  - {f}")
         typer.echo()
 
-        # Build per-file config
-        per_file_config = {
-            "config": config,
-            "mode": mode,
-            "resume": resume,
-            "multi_perspective": multi_perspective or agent_count is not None,
-            "agent_count": agent_count,
-            "max_workers": max_workers,
-        }
+        # Build per-file config with namespace isolation for batch mode
+        # In batch mode, each file gets its own output subdirectory to prevent conflicts
+        # First, determine the base output directory from config
+        base_output_dir = None
+        if config:
+            try:
+                from longtext_pipeline.config import load_config
+
+                loaded_config = load_config(config)
+                base_output_dir = loaded_config.get("output", {}).get("dir")
+            except Exception:
+                pass  # Use default behavior if config can't be loaded
+
+        # If no explicit config output.dir, use default
+        if base_output_dir is None:
+            from longtext_pipeline.config import DEFAULT_CONFIG
+
+            base_output_dir = DEFAULT_CONFIG["output"]["dir"]
+
+        base_output_path = Path(base_output_dir).resolve()
+
+        # Create per-file config with namespaced output directories
+        # Note: per_file_config is now a dict keyed by file path
+        per_file_config = {}
+        for file_path in input_files:
+            # Generate unique namespace for this file
+            namespace = create_namespace_for_file(file_path)
+            namespaced_output = str(base_output_path / namespace)
+
+            per_file_config[file_path] = {
+                "config": config,
+                "mode": mode,
+                "resume": resume,
+                "multi_perspective": multi_perspective or agent_count is not None,
+                "agent_count": agent_count,
+                "max_workers": max_workers,
+                "output_dir": namespaced_output,
+            }
 
         # Create batch processor and run
         processor = BatchProcessor(
@@ -457,6 +460,8 @@ def batch(
             typer.echo(f"Max concurrent files: {batch_max_workers}")
         if max_workers:
             typer.echo(f"Max workers per file: {max_workers}")
+        typer.echo(f"Output directory: {base_output_path}")
+        typer.echo("Each file will have a namespaced subdirectory for artifacts")
         typer.echo()
 
         results = processor.run_batch(input_files, per_file_config)

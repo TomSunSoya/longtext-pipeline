@@ -15,9 +15,9 @@ Run the full analysis pipeline on a single input file.
 
 ### Supported inputs
 
-For end-to-end manual runs, prefer `.txt` and `.md`.
+`longtext run` supports `.txt`, `.md`, `.pdf`, and `.docx` inputs end to end.
 
-The repository also contains `.pdf` and `.docx` extraction code, and some CLI validators already accept those extensions, but the full orchestration path is still being normalized. If you want the least surprising behavior, use text or markdown.
+PDF and DOCX inputs are extracted to text during ingest before the remaining pipeline stages run.
 
 ### Flags
 
@@ -81,9 +81,9 @@ longtext batch "doc1.txt,doc2.txt,doc3.txt" --config config.yaml
 longtext batch "*.md" --parallel --batch-max-workers 2 --multi-perspective
 ```
 
-### Batch caveat
+### Batch output layout
 
-If you force many files to share the same explicit `output.dir`, generated artifacts can land in the same `.longtext/` directory. The safest batch layout is still the default per-input adjacent output.
+If batch runs redirect generated artifacts through `output.dir`, each input file gets a namespaced subdirectory under the configured base directory. That keeps artifacts from different inputs from landing in the same `.longtext/` directory.
 
 ## `longtext status <input-file>`
 
@@ -121,30 +121,32 @@ longtext init --dir ./demo-project
 
 ## Output layout
 
-### Default
+### Built-in defaults
 
-Without `output.dir`, the runtime writes working files next to the input file in a `.longtext/` directory:
+With the built-in defaults, generated artifacts are written under `./output/.longtext/`:
 
 ```text
-.longtext/
+output/.longtext/
 ├── part_00.txt
 ├── summary_00.md
 ├── stage_00.md
 ├── final_analysis.md
-├── manifest.json
-├── metrics.prom
-└── .locks/
+└── metrics.prom
 ```
 
 ### With `output.dir`
 
-When `output.dir` is configured for a standard single-file run:
+For standard single-file runs with a custom `output.dir`:
 
 - part, summary, stage, final-analysis, and metrics files go to `<output.dir>/.longtext/`
 - manifest and `.locks/` remain beside the input file in its local `.longtext/`
 
+For batch runs with a custom `output.dir`:
+
+- each input gets a namespaced output base such as `<output.dir>/report_a1b2c3d4/.longtext/`
+- manifest and `.locks/` still remain beside each source input file
+
 ## Current caveats
 
 - Audit is active and no longer just a skipped placeholder stage.
-- The safest manual input types are still `.txt` and `.md`.
 - `status` is manifest-based, so it follows the input-local manifest rather than the redirected artifact directory.

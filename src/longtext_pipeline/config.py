@@ -8,7 +8,7 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 import yaml  # type: ignore[import-untyped]
 
 
@@ -47,7 +47,7 @@ def migrate_config(config: dict, source_path: Optional[str | Path] = None) -> di
     """
 
     # Create a deep copy to avoid modifying the original
-    migrated = _deep_copy(config)
+    migrated: dict[str, Any] = _deep_copy(config)
 
     source_hint = f" (from {source_path})" if source_path else ""
 
@@ -155,7 +155,7 @@ class ConfigError(Exception):
 
 
 # Default configuration values (MVP)
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "model": {
         "provider": "openai",
         "name": "gpt-4o-mini",
@@ -836,7 +836,7 @@ def get_agent_model_config(config: dict, agent_type: str) -> dict:
     return result  # type: ignore[return-value,no-any-return]
 
 
-def get_agent_provider_configs(config: dict, agent_type: str) -> list:
+def get_agent_provider_configs(config: dict, agent_type: str) -> list[dict[str, Any]]:
     """Get list of provider configurations for multi-provider mode per agent.
 
     Args:
@@ -870,7 +870,7 @@ def get_agent_provider_configs(config: dict, agent_type: str) -> list:
 
     if provider_configs and isinstance(provider_configs, list):
         # This is a multi-provider configuration
-        return _deep_copy(provider_configs)
+        return cast(list[dict[str, Any]], _deep_copy(provider_configs))
 
     # Check if agent has a provider reference that maps to a main providers section
     model_name = agent_config.get("model")
@@ -897,7 +897,9 @@ def get_agent_provider_configs(config: dict, agent_type: str) -> list:
         if "providers" in agent_model_config and isinstance(
             agent_model_config["providers"], list
         ):
-            return _deep_copy(agent_model_config["providers"])
+            return cast(
+                list[dict[str, Any]], _deep_copy(agent_model_config["providers"])
+            )
 
     # Fall back to single provider using top-level config and agent-specific override
     model_config = get_agent_model_config(config, agent_type)
@@ -1013,7 +1015,7 @@ def _deep_copy(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {k: _deep_copy(v) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [_deep_copy(item) for item in obj]  # type: ignore[misc]
+        return [_deep_copy(item) for item in obj]
     else:
         return obj
 

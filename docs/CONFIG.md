@@ -119,12 +119,14 @@ Important:
 
 `output.dir` is validated and created during config loading.
 
+The built-in default is `./output`.
+
 In the standard single-file pipeline path:
 
 - part, summary, stage, final-analysis, and metrics files are written under `<output.dir>/.longtext/`
 - manifest and lock files remain next to the input file in its local `.longtext/`
 
-For batch runs, be careful with a shared explicit `output.dir`, because artifacts are not namespaced per input file.
+For batch runs, generated artifacts are namespaced per input file under the configured base directory, for example `<output.dir>/report_a1b2c3d4/.longtext/`.
 
 ### `input`
 
@@ -161,4 +163,4 @@ Lets advanced users override model settings per role, for example:
 - For normal local use, keep secrets in `longtext.local.yaml` and commit only reusable example configs.
 - If you just want the default prompts, do not change `prompts.dir`.
 - If you distribute a packaged install, verify the wheel includes prompt `.txt` files.
-- For the least surprising manual runs, prefer `.txt` and `.md` inputs until the top-level PDF/DOCX path is fully normalized.
+- `longtext run` supports `.txt`, `.md`, `.pdf`, and `.docx`; use `.pdf` and `.docx` when you want ingest to extract document text for you.

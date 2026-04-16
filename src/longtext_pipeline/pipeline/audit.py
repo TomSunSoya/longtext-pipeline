@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ..llm.openai_compatible import OpenAICompatibleClient
 from ..manifest import ManifestManager
@@ -34,10 +34,21 @@ from .audit_types import (
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class AuditClient(Protocol):
+    """Protocol for audit clients (both LLM-backed and offline heuristics)."""
+
+    context_window: int
+
+    def complete(self, prompt: str) -> str: ...
+
+    def complete_json(self, prompt: str) -> dict[str, Any]: ...
+
+
 class _OfflineAuditClient:
     """Minimal offline client used when no API-backed client can be created."""
 
-    context_window = 32000
+    context_window: int = 32000
 
     def complete(self, prompt: str) -> str:
         return (
@@ -55,7 +66,7 @@ class AuditStage:
     def __init__(
         self,
         manifest_manager: Optional[ManifestManager] = None,
-        llm_client: Optional[OpenAICompatibleClient] = None,
+        llm_client: Optional[AuditClient] = None,
     ):
         """Initialize the audit stage.
 
@@ -198,7 +209,7 @@ class AuditStage:
         """
 
         # Combine temporal expressions (events) with entity names for context
-        temporal_entities = []
+        temporal_entities: List[TimelineEvent] = []
         sentences = re.split(r"[.!?]+\s+", text)
         current_pos = extract_position
 
@@ -497,7 +508,7 @@ class AuditStage:
             similarity_score = overlap / total_words
             # Find the approximate location with the closest word patterns
             best_pos = 0
-            best_score = 0
+            best_score: float = 0.0
             window_size = min(
                 int(len(source_document) / 20), 500
             )  # Divide source into sections to find best match
@@ -612,7 +623,7 @@ class AuditStage:
         self, claim: str, source_doc: str, source_lines: List[str]
     ) -> List[Dict]:
         """Find exact phrase matches in the source document."""
-        matches = []
+        matches: List[Dict] = []
 
         # Convert both to lowercase for case-insensitive matching
         claim_lower = claim.lower()
@@ -653,7 +664,7 @@ class AuditStage:
         self, claim: str, source_doc: str, source_lines: List[str]
     ) -> List[Dict]:
         """Find semantically related content in the source document."""
-        matches = []
+        matches: List[Dict] = []
 
         # Find paragraphs that share significant vocabulary with the claim
         claim_words = set(re.findall(r"\b\w+\b", claim.lower()))
@@ -695,7 +706,7 @@ class AuditStage:
         self, claim: str, source_doc: str, source_lines: List[str]
     ) -> List[Dict]:
         """Find approximate matches using fuzzy string matching logic."""
-        matches = []
+        matches: List[Dict] = []
 
         # Break down source into sentences to enable sentence-level matching
         sentences = re.split(r"[.!?]+", source_doc)
@@ -763,7 +774,7 @@ class AuditStage:
 
         # Combine both lists to compare source vs analysis
         all_events = source_text_events + analysis_events
-        anomalies = []
+        anomalies: List[TimelineAnomaly] = []
 
         # Compare each pair of events to see if their temporal relationships differ between source and analysis
         # For this implementation, we'll look for simple chronological issues
@@ -1159,7 +1170,7 @@ class AuditStage:
                 hallucination_result=hallucination_result,
                 context_window=context_window,
             )
-            response = self.client.complete(full_prompt)
+            response: str = self.client.complete(full_prompt)
             return response
         except Exception as e:
             logger.error(f"Error generating detailed audit report: {e}")
@@ -1681,7 +1692,9 @@ class AuditStage:
         try:
             source_document = read_file(manifest.input_path)
         except Exception as exc:
-            logger.warning("Unable to read source document for claim validation: %s", exc)
+            logger.warning(
+                "Unable to read source document for claim validation: %s", exc
+            )
 
         prompt = (
             f"Mode: {mode}\n"
@@ -1692,7 +1705,7 @@ class AuditStage:
 
         if hasattr(self.client, "complete_json"):
             try:
-                response = self.client.complete_json(prompt)
+                response: dict[str, Any] = self.client.complete_json(prompt)
                 supported = bool(response.get("supported"))
                 return HallucinationDetectionResult(
                     claim=claim,
@@ -1715,10 +1728,14 @@ class AuditStage:
                     "Falling back to heuristic claim validation for audit: %s", exc
                 )
 
-        evidence = self.find_evidence_in_source(self._create_claim(claim), source_document)
+        evidence = self.find_evidence_in_source(
+            self._create_claim(claim), source_document
+        )
         supported = evidence.found_in_source and evidence.similarity_score >= 0.2
         similarity = evidence.similarity_score
-        confidence = "high" if similarity >= 0.75 else "medium" if similarity >= 0.4 else "low"
+        confidence = (
+            "high" if similarity >= 0.75 else "medium" if similarity >= 0.4 else "low"
+        )
         explanation = (
             "The claim is supported by the source document."
             if supported
@@ -1791,11 +1808,7 @@ class AuditStage:
         self, accuracy_score: float, consistency_score: float, coverage_score: float
     ) -> float:
         """Legacy weighted overall score."""
-        return (
-            accuracy_score * 0.60
-            + consistency_score * 0.25
-            + coverage_score * 0.15
-        )
+        return accuracy_score * 0.60 + consistency_score * 0.25 + coverage_score * 0.15
 
     def get_quality_description(self, score: float) -> str:
         """Map a numeric score to a human-readable legacy quality band."""

@@ -77,18 +77,21 @@ class LongtextPipeline:
         multi_perspective: bool = False,
         specialist_count: Optional[int] = None,
         max_workers: Optional[int] = None,
+        output_dir_override: Optional[str] = None,
     ) -> FinalAnalysis:
         """
         Execute the entire processing pipeline from input to final analysis.
 
         Args:
-            input_path: Path to input file (supports txt/md)
+            input_path: Path to input file (supports txt, md, pdf, and docx)
             config_path: Optional path to config file (uses defaults if None)
             mode: Analysis mode ("general" or "relationship")
             resume: Whether to resume from existing checkpoints
             multi_perspective: Whether to use multi-perspective parallel specialist agents
             specialist_count: Optional number of final-analysis specialist agents to run
             max_workers: Optional maximum concurrent workers for summarize and stage stages
+            output_dir_override: Optional override for output directory (used in batch mode
+                                to create namespaced subdirectories for each input file)
 
         Returns:
             FinalAnalysis object with results and error tracking
@@ -128,12 +131,24 @@ class LongtextPipeline:
                 config.setdefault("pipeline", {})
                 config["pipeline"]["specialist_count"] = specialist_count
 
-            # 2.2 Determine output directory from config
-            output_dir_config = config.get("output", {}).get("dir")
-            if output_dir_config:
-                output_dir = Path(output_dir_config)
+            # 2.2 Determine output directory from config or override
+            # Priority: output_dir_override > config.output.dir > default (input-adjacent)
+            if output_dir_override:
+                # Use the override (typically namespaced in batch mode)
+                output_dir = Path(output_dir_override)
             else:
-                output_dir = None  # Will default to adjacent .longtext/
+                # Fall back to config's output.dir setting
+                output_dir_config = config.get("output", {}).get("dir")
+                if output_dir_config:
+                    output_dir = Path(output_dir_config)
+                else:
+                    output_dir = None  # Will default to adjacent .longtext/
+
+            # Stages write outputs based on config.output.dir, so propagate any runtime
+            # override there to keep stage writes and resume reads aligned.
+            if output_dir is not None:
+                config.setdefault("output", {})
+                config["output"]["dir"] = str(output_dir)
 
             # 3. Initialize manifest manager
             manifest_manager = self.manifest_manager
@@ -627,17 +642,22 @@ class LongtextPipeline:
         if not os.access(path, os.R_OK):
             raise PermissionError(f"Cannot read input file: {input_path}")
 
-        # Check extension (only txt/md supported)
+        # Check extension
         ext = path.suffix.lower()
-        if ext not in [".txt", ".md"]:
+        if ext not in [".txt", ".md", ".pdf", ".docx"]:
             raise ValueError(
-                f"Unsupported file format. Only .txt and .md files are supported, got: {ext}"
+                "Unsupported file format. Only .txt, .md, .pdf, and .docx files "
+                f"are supported, got: {ext}"
             )
 
         return str(path)
 
     def _get_run_lock_path(self, input_path: str) -> Path:
-        """Build a per-input lock path inside the adjacent .longtext directory."""
+        """Build a per-input lock path inside the adjacent .longtext directory.
+
+        Lock files ALWAYS remain input-adjacent, regardless of output_dir_override.
+        This ensures resume and status work correctly even with namespaced outputs.
+        """
         resolved_input = Path(input_path).resolve()
         lock_id = hashlib.sha256(str(resolved_input).encode("utf-8")).hexdigest()[:16]
         return (

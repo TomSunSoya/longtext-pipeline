@@ -23,6 +23,7 @@ CLI
 ```text
 CLI batch
   -> Input expansion and validation
+  -> Per-file output namespace assignment
   -> BatchProcessor
   -> N independent single-file pipeline runs
      -> sequential mode or parallel mode
@@ -93,26 +94,28 @@ CLI batch
 
 ### Default layout
 
-When `output.dir` is not set, the runtime writes working files adjacent to the input in `.longtext/`.
+With the built-in defaults, generated artifacts are written under `./output/.longtext/`.
 
-That directory contains:
+Manifest and lock files remain adjacent to the input in its local `.longtext/`.
+
+That split is intentional in the current implementation because resume and status lookup still key off the input-local manifest.
+
+The generated-artifact directory contains:
 
 - split parts
 - intermediate summaries
 - stage summaries
 - final outputs
-- manifest
 - metrics export
-- lock files
 
 ### Custom output layout
 
-When `output.dir` is set for the standard pipeline path:
+When `output.dir` is set for the standard single-file pipeline path:
 
 - part, summary, stage, final-analysis, and metrics files are written to `<output.dir>/.longtext/`
 - manifest and lock files still remain adjacent to the input file in its local `.longtext/`
 
-That split is intentional in the current implementation because resume and status lookup still key off the input-local manifest.
+When batch redirects generated artifacts through `output.dir`, the CLI assigns a namespaced base directory per input file, for example `<output.dir>/report_a1b2c3d4/.longtext/`.
 
 ## Concurrency model
 
@@ -124,7 +127,7 @@ That split is intentional in the current implementation because resume and statu
 
 ## Operational caveats
 
-- The top-level `LongtextPipeline.run()` path still validates only `.txt` and `.md`, even though the ingest layer and CLI validators contain PDF/DOCX support. Treat text and markdown as the safest end-to-end inputs today.
+- `LongtextPipeline.run()` now validates `.txt`, `.md`, `.pdf`, and `.docx`, matching the ingest layer and CLI surface.
 - Audit is active, not a placeholder, but it may fall back to offline heuristics when no API-backed auditor can be created.
-- `output.dir` works for standard stage artifacts, but batch users should avoid sharing one explicit output directory across many inputs unless mixed artifacts are acceptable.
+- Batch runs namespace redirected artifacts per input file, so different inputs do not mix generated stage files under one shared output base.
 - Editable installs can hide packaging bugs, so release validation should include a wheel or non-editable install path to confirm prompt files are packaged.

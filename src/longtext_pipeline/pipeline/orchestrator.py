@@ -68,6 +68,18 @@ class LongtextPipeline:
         self.manifest_manager = ManifestManager()
         self.error_aggregator = ErrorAggregator()
 
+    @staticmethod
+    def _mark_manifest_completed_unless_degraded(manifest: Manifest) -> None:
+        """Mark the manifest completed unless an earlier stage already degraded it."""
+        if manifest.status in {
+            "completed_with_issues",
+            "partial_success",
+            "failed",
+            "interrupted",
+        }:
+            return
+        manifest.status = "completed"
+
     def run(
         self,
         input_path: str,
@@ -438,7 +450,7 @@ class LongtextPipeline:
                         "successful",
                         output_file=f"final_analysis.md for {Path(input_path).name}",
                     )
-                    manifest.status = "completed"
+                    self._mark_manifest_completed_unless_degraded(manifest)
 
                 # STAGE 5: AUDIT (conditional)
                 current_stage = "audit"
@@ -478,7 +490,7 @@ class LongtextPipeline:
                                 "report_path": audit_data.get("report_path"),
                             },
                         )
-                        manifest.status = "completed"
+                        self._mark_manifest_completed_unless_degraded(manifest)
                     else:
                         logger.warning(
                             "Audit stage encountered errors or produced partial results"
@@ -511,7 +523,7 @@ class LongtextPipeline:
                             output_file="audit_report.md",
                             stats=audit_stage_info.stats,
                         )
-                        manifest.status = "completed"
+                        self._mark_manifest_completed_unless_degraded(manifest)
                     else:
                         self.manifest_manager.update_stage(
                             manifest,
@@ -519,7 +531,7 @@ class LongtextPipeline:
                             "successful",
                             output_file="audit_report.md",
                         )
-                        manifest.status = "completed"
+                        self._mark_manifest_completed_unless_degraded(manifest)
 
             except Exception as e:
                 error_msg = f"{current_stage} stage failed with error: {str(e)}"

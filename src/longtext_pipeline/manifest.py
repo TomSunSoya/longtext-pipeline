@@ -296,7 +296,8 @@ class ManifestManager:
         stage.stats = stats if stats is not None else stage.stats
         stage.timestamp = datetime.now()
         manifest.updated_at = datetime.now()
-        manifest.status = status
+        if status not in {"successful", "successful_with_warnings"}:
+            manifest.status = status
 
     def is_stage_complete(self, manifest: Manifest, stage_name: str) -> bool:
         """

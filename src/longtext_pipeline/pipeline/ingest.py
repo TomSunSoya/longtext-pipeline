@@ -31,7 +31,11 @@ def _safe_display_relative_path(input_path: str, base_dir: Path) -> str:
         return Path(input_path).resolve().relative_to(base_dir.resolve()).as_posix()
     except ValueError:
         try:
-            return Path(os.path.relpath(str(Path(input_path).resolve()), str(base_dir.resolve()))).as_posix()
+            return Path(
+                os.path.relpath(
+                    str(Path(input_path).resolve()), str(base_dir.resolve())
+                )
+            ).as_posix()
         except ValueError:
             return Path(input_path).name
 
@@ -69,7 +73,7 @@ class IngestStage:
         """Run the ingest stage on input file.
 
         Args:
-            input_path: Path to input file (txt/md/docx)
+            input_path: Path to input file (txt/md/pdf/docx)
             config: Configuration dictionary
             manifest: Manifest object to update
 
@@ -105,7 +109,9 @@ class IngestStage:
                     input_path, config=config
                 )
             except ImportError as e:
-                raise InputError(f"PDF support requires additional dependencies: {e}")
+                raise InputError(
+                    f"PDF support requires additional dependencies: {e}"
+                ) from e
         elif input_ext == ".docx":
             # Handle DOCX files with python-docx
             try:
@@ -114,7 +120,9 @@ class IngestStage:
                     input_path, config=config
                 )
             except ImportError as e:
-                raise InputError(f"DOCX support requires additional dependencies: {e}")
+                raise InputError(
+                    f"DOCX support requires additional dependencies: {e}"
+                ) from e
         else:
             # Handle text-based files as before
             raw_content = read_file(input_path)
@@ -182,7 +190,9 @@ class IngestStage:
         saved_parts_paths = []
         for part in parts:
             # Create the text portion of the part file
-            part_relative_path = _safe_display_relative_path(input_path, parts_dir.parent)
+            part_relative_path = _safe_display_relative_path(
+                input_path, parts_dir.parent
+            )
             part_filename = f"part_{part.index:02d}.txt"
             part_path = parts_dir / part_filename
 

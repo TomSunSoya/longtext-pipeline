@@ -135,11 +135,11 @@ class TestOutputDirIntegration:
         """Environment variable override should create output directory."""
         output_dir = tmp_path / "env_output"
         monkeypatch.setenv("LONGTEXT_OUTPUT_DIR", str(output_dir))
+        monkeypatch.chdir(tmp_path)
 
-        # Note: validate_config doesn't process env vars - that's done by merge_env_overrides
-        # Test just ensures _validate_output_dir works correctly
-        config = {"output": {}}
-        _validate_output_dir(config)
+        from src.longtext_pipeline.config import load_runtime_config
 
-        # When dir is None/unspecified, it should use the default
-        # The default dir from DEFAULT_CONFIG should be used
+        config, _ = load_runtime_config(search_dir=tmp_path)
+
+        assert config["output"]["dir"] == str(output_dir)
+        assert output_dir.exists()

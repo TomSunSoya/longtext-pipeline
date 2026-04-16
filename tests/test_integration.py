@@ -688,8 +688,8 @@ class TestEdgeCases:
     def test_unsupported_file_format(self, pipeline, temp_dir, sample_config):
         """Test that unsupported file formats are rejected."""
         # Create unsupported file
-        input_path = Path(temp_dir) / "document.pdf"
-        input_path.write_text("PDF content", encoding="utf-8")
+        input_path = Path(temp_dir) / "document.rtf"
+        input_path.write_text("RTF content", encoding="utf-8")
 
         # Should reject unsupported format - may fail at validation or during run
         try:
@@ -714,6 +714,8 @@ class TestEdgeCases:
                 or "format" in error_lower
                 or "txt" in error_lower
                 or "md" in error_lower
+                or "pdf" in error_lower
+                or "docx" in error_lower
             )
 
     def test_nonexistent_input_file(self, pipeline, sample_config):

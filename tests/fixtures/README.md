@@ -16,19 +16,17 @@ tests/fixtures/
 
 Contains 10 sample PDF files covering various document types and complexity levels.
 
-### Text-Based PDFs (3 files)
+### Text-Based PDFs (2 files)
 | File | Size | Description |
 |------|------|-------------|
 | `01_simple.pdf` | ~0.00 MB | Single-column text document |
 | `02_multi_column.pdf` | ~0.00 MB | Two-column layout for column parsing tests |
-| `03_with_tables.pdf` | ~0.00 MB | Document with embedded data tables |
 
-### Scanned PDFs (3 files)  
+### Scanned PDFs (2 files)  
 | File | Size | Description |
 |------|------|-------------|
-| `04_scanned_simple.pdf` | ~0.00 MB | Simulated scanned document, requires OCR |
-| `05_scanned_multi_page.pdf` | ~0.00 MB | Multi-page scanned document with noise |
-| `06_scanned_form.pdf` | ~0.00 MB | Scanned form/document with form elements |
+| `03_scanned_simple.pdf` | ~0.00 MB | Simulated scanned document, requires OCR |
+| `04_scanned_multi_page.pdf` | ~0.00 MB | Multi-page scanned document with noise |
 
 ### Hybrid PDFs (2 files)
 | File | Size | Description |
@@ -36,11 +34,13 @@ Contains 10 sample PDF files covering various document types and complexity leve
 | `07_hybrid_report.pdf` | ~0.00 MB | Mix of text and image placeholders |
 | `08_hybrid_document.pdf` | ~0.00 MB | Complex layout with mixed content |
 
-### Special Test PDFs (2 files)
+### Special Test PDFs (4 files)
 | File | Size | Description |
 |------|------|-------------|
-| `09_encrypted_restrictions.pdf` | ~0.00 MB | Encrypted document for error testing |
-| `10_large_document.pdf` | ~0.07 MB | 105-page document for pagination tests |
+| `05_encrypted_restrictions.pdf` | ~0.00 MB | Encrypted document for error testing |
+| `06_large_document.pdf` | ~0.07 MB | 105-page document for pagination tests |
+| `09_table_document.pdf` | ~0.00 MB | Document with table-heavy layout |
+| `10_complex_layout.pdf` | ~0.00 MB | Complex layout stress fixture |
 
 ### PDF Usage
 
@@ -51,7 +51,7 @@ pdf_dir = Path("tests/fixtures/pdfs")
 
 # Access specific PDFs
 simple_pdf = pdf_dir / "01_simple.pdf"
-large_pdf = pdf_dir / "10_large_document.pdf"
+large_pdf = pdf_dir / "06_large_document.pdf"
 
 # Test various scenarios
 assert simple_pdf.exists()

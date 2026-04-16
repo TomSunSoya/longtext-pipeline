@@ -236,9 +236,17 @@ class FinalAnalysisStage:
 
                 # Determine mode based on config
                 dispatch_mode = ParallelMode.PARALLEL
-                if effective_config.get("model", {}).get("dispatch_mode") == "fastest":
+                if (
+                    effective_config
+                    and effective_config.get("model", {}).get("dispatch_mode")
+                    == "fastest"
+                ):
                     dispatch_mode = ParallelMode.FASTEST
-                elif effective_config.get("model", {}).get("dispatch_mode") == "ranked":
+                elif (
+                    effective_config
+                    and effective_config.get("model", {}).get("dispatch_mode")
+                    == "ranked"
+                ):
                     dispatch_mode = ParallelMode.RANKED
 
                 # Use system prompt for mode - reuse generic one for analysts
@@ -377,20 +385,26 @@ class FinalAnalysisStage:
 
             # Determine mode based on config
             dispatch_mode = ParallelMode.PARALLEL
-            if effective_config.get("model", {}).get("dispatch_mode") == "fastest":
+            if (
+                effective_config
+                and effective_config.get("model", {}).get("dispatch_mode") == "fastest"
+            ):
                 dispatch_mode = ParallelMode.FASTEST
-            elif effective_config.get("model", {}).get("dispatch_mode") == "ranked":
+            elif (
+                effective_config
+                and effective_config.get("model", {}).get("dispatch_mode") == "ranked"
+            ):
                 dispatch_mode = ParallelMode.RANKED
 
             # Execute dispatch
-            result = await dispatcher.dispatch(
+            result = await dispatcher.dispatch(  # type: ignore[assignment]
                 prompt=meta_prompt,
                 mode=dispatch_mode,
                 provider_configs=agent_provider_configs,
             )
 
             aggregated_content = (
-                result.primary_content if result.primary_content else ""
+                result.primary_content if result.primary_content else ""  # type: ignore[attr-defined]
             )
         else:
             # Use traditional single client approach

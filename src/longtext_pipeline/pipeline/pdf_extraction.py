@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 try:
     from .ocr_fallback import OCREngine
 except ImportError:
-    OCREngine = None
+    OCREngine = None  # type: ignore[assignment, misc]
 
 # Conditional import since pdfplumber is not yet in requirements
 try:
-    import pdfplumber
+    import pdfplumber  # type: ignore[import-untyped]
 except ImportError:
-    pdfplumber = None
+    pdfplumber = None  # type: ignore[assignment]
 
 
 class PDFTextExtractor:
@@ -223,7 +223,7 @@ class PDFTextExtractor:
                 logger.info(
                     f"Attempting OCR fallback for {pdf_path} with token ratio threshold: {threshold_token_ratio}"
                 )
-                if OCREngine:
+                if OCREngine is not None:
                     try:
                         ocr_config = config.get("ocr", {})
                         ocr_engine = OCREngine(config=ocr_config)
@@ -266,7 +266,7 @@ class PDFTextExtractor:
             logger.info(
                 f"Low text quality detected (ratio: {alphanum_ratio:.3f}), attempting OCR fallback"
             )
-            if OCREngine:
+            if OCREngine is not None:
                 try:
                     ocr_config = config.get("ocr", {})
                     ocr_engine = OCREngine(config=ocr_config)

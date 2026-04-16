@@ -19,16 +19,16 @@ logger = logging.getLogger(__name__)
 
 # Conditional imports for fallback OCR
 try:
-    import pytesseract
-    from PIL import Image
+    import pytesseract  # type: ignore[import-untyped]
+    from PIL import Image  # type: ignore[import-untyped]
 except ImportError:
-    pytesseract = None
-    Image = None
+    pytesseract = None  # type: ignore[assignment]
+    Image = None  # type: ignore[assignment]
 
 try:
-    import pdf2image
+    import pdf2image  # type: ignore[import-untyped]
 except ImportError:
-    pdf2image = None
+    pdf2image = None  # type: ignore[assignment]
 
 
 class OCRAPIError(Exception):
@@ -104,7 +104,7 @@ class OCRAPIClient:
             response.raise_for_status()  # Raises exception for bad status codes
             result = response.json()
             logger.info(f"OCR API responded with status: {response.status_code}")
-            return result
+            return result  # type: ignore[no-any-return]
 
         except httpx.TimeoutException:
             error_msg = "OCR API request timed out after 60 seconds"
@@ -172,7 +172,7 @@ class OCRLocalFallback:
                 pdf_path,
                 dpi=200,
                 thread_count=4,
-                poppler_path=os.getenv("POPPLER_PATH"),
+                poppler_path=os.getenv("POPPLER_PATH"),  # type: ignore[arg-type]
             )
 
             # Apply OCR on each page image
@@ -258,7 +258,8 @@ class OCREngine:
 
                         # Send to API
                         result = ocr_client.submit_to_api(
-                            base64_pdf=base64_pdf, mode=extraction_mode
+                            base64_pdf=base64_pdf,
+                            mode=extraction_mode,  # type: ignore[arg-type]
                         )
 
                         # Parse the returned content - expecting markdown or text in a specific field
@@ -274,7 +275,7 @@ class OCREngine:
 
                         # Validate that API OCR produced meaningful text
                         if self._is_acceptable_ocr_result(extracted_text):
-                            return extracted_text
+                            return extracted_text  # type: ignore[no-any-return]
                         else:
                             logger.warning(
                                 "API OCR result is not adequate, proceeding to local fallback"

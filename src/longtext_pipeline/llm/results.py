@@ -110,7 +110,10 @@ class ResultRanker:
             return max(candidates, key=self._calculate_cost_score)
         if strategy == RankingStrategy.BEST_QUALITY:
             return max(
-                candidates, key=lambda response: self._calculate_quality_score(response).quality_score
+                candidates,
+                key=lambda response: (
+                    self._calculate_quality_score(response).quality_score
+                ),
             )
         if strategy == RankingStrategy.BEST_PRICE_QUALITY:
             return max(candidates, key=self._calculate_combined_score)
@@ -120,7 +123,8 @@ class ResultRanker:
             return random.choice(candidates)
 
         return max(
-            candidates, key=lambda response: self._calculate_quality_score(response).quality_score
+            candidates,
+            key=lambda response: self._calculate_quality_score(response).quality_score,
         )
 
     def _select_round_robin(
@@ -203,9 +207,15 @@ class ResultRanker:
         if not non_empty_lines:
             return 0.0
 
-        paragraph_count = max(1, len([line for line in non_empty_lines if len(line) > 40]))
+        paragraph_count = max(
+            1, len([line for line in non_empty_lines if len(line) > 40])
+        )
         heading_count = len(
-            [line for line in non_empty_lines if line.strip().startswith(("#", "##", "###"))]
+            [
+                line
+                for line in non_empty_lines
+                if line.strip().startswith(("#", "##", "###"))
+            ]
         )
         list_count = len(
             [
@@ -219,7 +229,9 @@ class ResultRanker:
         heading_score = min(1.0, heading_count / 3.0)
         list_score = min(1.0, list_count / 4.0)
 
-        return min(1.0, (paragraph_score * 0.5) + (heading_score * 0.25) + (list_score * 0.25))
+        return min(
+            1.0, (paragraph_score * 0.5) + (heading_score * 0.25) + (list_score * 0.25)
+        )
 
     def _calculate_coherence_score(self, content: str) -> float:
         """Estimate coherence from sentence balance and discourse markers."""

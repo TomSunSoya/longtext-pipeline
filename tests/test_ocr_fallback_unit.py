@@ -84,7 +84,9 @@ def test_ocr_engine_uses_local_fallback_after_api_failure(tmp_path, monkeypatch)
         }
     )
     monkeypatch.setattr(engine, "_evaluate_initial_text_density", lambda path: "")
-    monkeypatch.setattr(engine, "_is_acceptable_text_extraction", lambda text, ratio: False)
+    monkeypatch.setattr(
+        engine, "_is_acceptable_text_extraction", lambda text, ratio: False
+    )
     monkeypatch.setattr(
         ocr_module,
         "OCRAPIClient",
@@ -121,7 +123,9 @@ def test_ocr_engine_raises_when_local_fallback_disabled(tmp_path, monkeypatch):
         }
     )
     monkeypatch.setattr(engine, "_evaluate_initial_text_density", lambda path: "")
-    monkeypatch.setattr(engine, "_is_acceptable_text_extraction", lambda text, ratio: False)
+    monkeypatch.setattr(
+        engine, "_is_acceptable_text_extraction", lambda text, ratio: False
+    )
     monkeypatch.setattr(
         ocr_module,
         "OCRAPIClient",

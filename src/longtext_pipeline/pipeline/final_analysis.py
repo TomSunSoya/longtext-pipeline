@@ -121,9 +121,7 @@ class FinalAnalysisStage:
             combined += stage_summary.synthesis
         return combined
 
-    def _all_stage_summaries_skipped(
-        self, stage_summaries: List[StageSummary]
-    ) -> bool:
+    def _all_stage_summaries_skipped(self, stage_summaries: List[StageSummary]) -> bool:
         """Return True when every stage summary comes from tiny-input skip flow."""
         return bool(stage_summaries) and all(
             stage_summary.metadata.get("skipped_input", False)
@@ -228,7 +226,11 @@ class FinalAnalysisStage:
             )
 
             # Determine appropriate client to use based on provider config
-            if client is None and agent_provider_configs and len(agent_provider_configs) > 1:
+            if (
+                client is None
+                and agent_provider_configs
+                and len(agent_provider_configs) > 1
+            ):
                 # Use parallel dispatcher for multi-providers
                 dispatcher = ParallelDispatcher()
 
@@ -365,7 +367,11 @@ class FinalAnalysisStage:
             else []
         )
 
-        if client is None and agent_provider_configs and len(agent_provider_configs) > 1:
+        if (
+            client is None
+            and agent_provider_configs
+            and len(agent_provider_configs) > 1
+        ):
             # Use parallel dispatcher for multi-providers
             dispatcher = ParallelDispatcher()
 

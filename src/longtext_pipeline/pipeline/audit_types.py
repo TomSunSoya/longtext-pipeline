@@ -176,9 +176,7 @@ class HallucinationDetectionResult:
         self.detected_hallucinations = list(kwargs.get("detected_hallucinations", []))
         self.quality_assessment = str(kwargs.get("quality_assessment", ""))
         self.evidence_trace = list(kwargs.get("evidence_trace", []))
-        self.enhanced_evidence_traces = list(
-            kwargs.get("enhanced_evidence_traces", [])
-        )
+        self.enhanced_evidence_traces = list(kwargs.get("enhanced_evidence_traces", []))
 
     def _init_legacy(
         self,

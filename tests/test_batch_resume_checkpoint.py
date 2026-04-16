@@ -531,7 +531,6 @@ class TestBatchResumeCheckpoint:
             with patch(
                 "src.longtext_pipeline.utils.io.read_file", return_value="test content"
             ):
-
                 # Mock a None manifest when no existing manifest exists
                 with patch.object(
                     batch_processor.manifest_manager, "load_manifest", return_value=None

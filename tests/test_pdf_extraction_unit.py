@@ -103,9 +103,7 @@ def test_extract_text_from_pdf_uses_ocr_when_empty(tmp_path, monkeypatch):
     mock_engine = SimpleNamespace(
         extract_text_from_pdf=lambda **kwargs: "OCR recovered text"
     )
-    monkeypatch.setattr(
-        pdf_module, "OCREngine", lambda config=None: mock_engine
-    )
+    monkeypatch.setattr(pdf_module, "OCREngine", lambda config=None: mock_engine)
 
     extractor = pdf_module.PDFTextExtractor()
     result = extractor.extract_text_from_pdf(

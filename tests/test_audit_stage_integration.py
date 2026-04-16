@@ -4,17 +4,104 @@ Test suite for audit stage integration with the main pipeline.
 These tests verify that the audit stage is properly integrated into the pipeline,
 runs as the final stage after FinalAnalysis, and operates correctly with
 different pipeline modes.
+All tests use mocked LLM responses to avoid requiring real API keys in CI.
 """
 
 import tempfile
 from pathlib import Path
 import json
+import pytest
+from contextlib import ExitStack
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.longtext_pipeline.pipeline.orchestrator import LongtextPipeline
 from src.longtext_pipeline.config import DEFAULT_CONFIG
 
 
-def test_audit_stage_runs_by_default():
+def _create_mock_llm_client():
+    """Create a mock LLM client that returns valid responses for all stages."""
+    mock_client = MagicMock()
+
+    # Set model as a string to avoid JSON serialization issues
+    mock_client.model = "mock-model"
+
+    # Mock sync request (used by summarize, stage, final)
+    def mock_sync_request(prompt, **kwargs):
+        return {
+            "content": f"Mocked analysis response for: {prompt[:50]}...",
+            "tokens_used": 100,
+            "model": "mock-model",
+        }
+
+    mock_client.make_sync_request = MagicMock(side_effect=mock_sync_request)
+    mock_client.complete = MagicMock(side_effect=mock_sync_request)
+
+    # Mock async request with AsyncMock for proper await support
+    async def mock_async_complete(prompt, **kwargs):
+        return f"Mocked async response for: {prompt[:50]}..."
+
+    mock_client.acomplete = AsyncMock(side_effect=mock_async_complete)
+
+    # Mock complete_json for audit
+    def mock_complete_json(prompt, **kwargs):
+        return {
+            "hallucinations": [],
+            "confidence_score": 0.95,
+            "quality": "high",
+        }
+
+    mock_client.complete_json = MagicMock(side_effect=mock_complete_json)
+
+    # Add context_window attribute for audit
+    mock_client.context_window = 32000
+
+    return mock_client
+
+
+@pytest.fixture(autouse=True)
+def mock_llm_client():
+    """Auto-use mock for all tests in this module to avoid real API calls."""
+    mock_client = _create_mock_llm_client()
+
+    with ExitStack() as stack:
+        # Patch all stage-level client factory seams
+        stack.enter_context(
+            patch(
+                "src.longtext_pipeline.pipeline.summarize.get_llm_client",
+                return_value=mock_client,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "src.longtext_pipeline.pipeline.stage_synthesis.get_llm_client",
+                return_value=mock_client,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "src.longtext_pipeline.pipeline.final_analysis.get_llm_client",
+                return_value=mock_client,
+            )
+        )
+        # Patch OpenAICompatibleClient for AuditStage (it creates client directly)
+        stack.enter_context(
+            patch(
+                "src.longtext_pipeline.pipeline.audit.OpenAICompatibleClient",
+                return_value=mock_client,
+            )
+        )
+        # Patch orchestrator's config loading to use minimal valid config
+        stack.enter_context(
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "mock-api-key-for-testing"},
+                clear=False,
+            )
+        )
+        yield mock_client
+
+
+def test_audit_stage_runs_by_default(mock_llm_client):
     """Test that audit stage runs by default in the complete pipeline flow."""
     # Create sample input file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:

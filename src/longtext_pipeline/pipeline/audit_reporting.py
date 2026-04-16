@@ -67,7 +67,9 @@ def _format_suspicious_claims(
 ) -> str:
     """Format the highest-signal suspicious claims for prompt inclusion."""
     items: list[str] = []
-    for index, item in enumerate(hallucination_result.detected_hallucinations[:8], start=1):
+    for index, item in enumerate(
+        hallucination_result.detected_hallucinations[:8], start=1
+    ):
         claim_text = item.get("claim") or item.get("text") or "Unknown claim"
         explanation = item.get("explanation") or "No explanation provided."
         confidence = item.get("confidence") or item.get("confidence_score") or "unknown"
@@ -78,7 +80,9 @@ def _format_suspicious_claims(
         )
 
     if not items:
-        return "No specific hallucination candidates were flagged by the automated scan."
+        return (
+            "No specific hallucination candidates were flagged by the automated scan."
+        )
 
     return "\n".join(items)
 
@@ -116,4 +120,3 @@ def _compress_text(text: str, target_chars: int) -> str:
     head = normalized[:head_chars].rstrip()
     tail = normalized[-tail_chars:].lstrip()
     return f"{head}\n\n[... truncated for audit budget ...]\n\n{tail}"
-

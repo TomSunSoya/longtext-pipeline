@@ -140,7 +140,9 @@ def test_detect_docx_format_handles_invalid_archive(monkeypatch):
     monkeypatch.setattr(
         docx_module,
         "docx",
-        SimpleNamespace(Document=lambda path: (_ for _ in ()).throw(RuntimeError("not a zip file"))),
+        SimpleNamespace(
+            Document=lambda path: (_ for _ in ()).throw(RuntimeError("not a zip file"))
+        ),
     )
 
     features = docx_module.detect_docx_format("bad.docx")
@@ -183,7 +185,9 @@ def test_extract_text_from_docx_maps_invalid_docx_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(
         docx_module,
         "docx",
-        SimpleNamespace(Document=lambda path: (_ for _ in ()).throw(RuntimeError("corrupt archive"))),
+        SimpleNamespace(
+            Document=lambda path: (_ for _ in ()).throw(RuntimeError("corrupt archive"))
+        ),
     )
 
     extractor = docx_module.DOCXTextExtractor()

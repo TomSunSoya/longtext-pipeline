@@ -82,6 +82,6 @@ class TestQualityScoreDataClasses:
         assert metric.description == "Source coverage metric"
         assert metric.confidence == 0.9
 
+
 def test_sample():
     assert True
-

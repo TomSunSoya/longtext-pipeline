@@ -202,7 +202,7 @@ logging:
   file: null
 
 # =============================================================================
-# EXPERIMENTAL FEATURES NOTES
+# RELATIONSHIP MODE NOTES
 # =============================================================================
 #
 # Relationship analysis is designed for:

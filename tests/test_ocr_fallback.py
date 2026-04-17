@@ -7,6 +7,7 @@ import tempfile
 from unittest.mock import Mock, patch
 import pytest
 import httpx
+import longtext_pipeline.pipeline.ocr_fallback as ocr_fallback_module
 from longtext_pipeline.pipeline.ocr_fallback import (
     OCRAPIClient,
     OCRLocalFallback,
@@ -124,20 +125,12 @@ class TestOCRLocalFallback:
 
     def test_validate_dependencies_missing_pytesseract(self):
         """Test that missing pytesseract raises ImportError."""
-        # Temporarily disable imports
-        old_pytesseract = ocrlf_mock_imports.pytesseract
-        old_image = ocrlf_mock_imports.Image
-
-        try:
-            ocrlf_mock_imports.pytesseract = None
-            ocrlf_mock_imports.Image = None
-            fallback = OCRLocalFallback()
-            with pytest.raises(ImportError, match="pytesseract, Pillow"):
-                fallback._validate_dependencies()
-        finally:
-            # Restore original values
-            ocrlf_mock_imports.pytesseract = old_pytesseract
-            ocrlf_mock_imports.Image = old_image
+        with patch.object(ocr_fallback_module, "pytesseract", None):
+            with patch.object(ocr_fallback_module, "Image", None):
+                with patch.object(ocr_fallback_module, "pdf2image", Mock()):
+                    fallback = OCRLocalFallback()
+                    with pytest.raises(ImportError, match="pytesseract, Pillow"):
+                        fallback._validate_dependencies()
 
 
 class TestOCREngine:
@@ -178,19 +171,3 @@ class TestOCREngine:
                 assert "extracted OCR text" in result
         finally:
             os.remove(temp_path)
-
-
-class CustomMockObject:
-    """Helper class to simulate imports."""
-
-    pytesseract = Mock()
-    Image = Mock()
-    pdf2image = Mock()
-
-
-def create_mock_imports():
-    """Create mock import objects for testing."""
-    return CustomMockObject()
-
-
-ocrlf_mock_imports = create_mock_imports()

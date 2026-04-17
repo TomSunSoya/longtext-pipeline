@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO, cast
 
 from ..errors import PipelineLockError
 from .io import ensure_dir
@@ -67,12 +67,13 @@ class InterProcessFileLock:
             if os.name == "nt":
                 import msvcrt
 
+                msvcrt_module = cast(Any, msvcrt)
                 handle.seek(0, os.SEEK_END)
                 if handle.tell() == 0:
                     handle.write("\0")
                     handle.flush()
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt_module.locking(handle.fileno(), msvcrt_module.LK_NBLCK, 1)
             else:
                 try:
                     import fcntl
@@ -92,8 +93,9 @@ class InterProcessFileLock:
         if os.name == "nt":
             import msvcrt
 
+            msvcrt_module = cast(Any, msvcrt)
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            msvcrt_module.locking(handle.fileno(), msvcrt_module.LK_UNLCK, 1)
         else:
             try:
                 import fcntl

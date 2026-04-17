@@ -1,5 +1,6 @@
 """Tests for the longtext batch CLI command."""
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -9,17 +10,23 @@ from longtext_pipeline.cli import app
 runner = CliRunner()
 
 
+def _plain(text: str) -> str:
+    """Strip ANSI escape sequences from rich CLI output."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 class TestBatchInputPatterns:
     """Test different input pattern formats."""
 
     def test_batch_shows_help(self):
         """Test that batch command shows help."""
         result = runner.invoke(app, ["batch", "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "Process multiple files" in result.stdout
-        assert "glob pattern" in result.stdout.lower()
-        assert "comma-separated" in result.stdout.lower()
+        assert "Process multiple files" in help_text
+        assert "glob pattern" in help_text.lower()
+        assert "comma-separated" in help_text.lower()
 
     def test_batch_with_glob_pattern(self, tmp_path: Path):
         """Test batch with glob pattern input."""
@@ -83,9 +90,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--config" in result.stdout
+        assert "--config" in help_text
 
     def test_batch_with_mode_option(self, tmp_path: Path):
         """Test batch accepts --mode option."""
@@ -93,9 +101,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--mode" in result.stdout
+        assert "--mode" in help_text
 
     def test_batch_with_resume_option(self, tmp_path: Path):
         """Test batch accepts --resume option."""
@@ -103,9 +112,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--resume" in result.stdout
+        assert "--resume" in help_text
 
     def test_batch_with_multi_perspective_option(self, tmp_path: Path):
         """Test batch accepts --multi-perspective option."""
@@ -113,9 +123,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--multi-perspective" in result.stdout
+        assert "--multi-perspective" in help_text
 
     def test_batch_with_agent_count_option(self, tmp_path: Path):
         """Test batch accepts --agent-count option."""
@@ -123,9 +134,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--agent-count" in result.stdout
+        assert "--agent-count" in help_text
 
     def test_batch_with_max_workers_option(self, tmp_path: Path):
         """Test batch accepts --max-workers option."""
@@ -133,9 +145,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--max-workers" in result.stdout
+        assert "--max-workers" in help_text
 
     def test_batch_with_parallel_option(self, tmp_path: Path):
         """Test batch accepts --parallel option."""
@@ -143,9 +156,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--parallel" in result.stdout
+        assert "--parallel" in help_text
 
     def test_batch_with_batch_max_workers_option(self, tmp_path: Path):
         """Test batch accepts --batch-max-workers option."""
@@ -153,9 +167,10 @@ class TestBatchOptions:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--batch-max-workers" in result.stdout
+        assert "--batch-max-workers" in help_text
 
 
 class TestBatchFlags:
@@ -167,9 +182,10 @@ class TestBatchFlags:
         test_file.write_text("test content")
 
         result = runner.invoke(app, ["batch", str(test_file), "--parallel", "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--batch-max-workers" in result.stdout
+        assert "--batch-max-workers" in help_text
 
     def test_batch_agent_count_implies_multi_perspective(self, tmp_path: Path):
         """Test that --agent-count implies --multi-perspective."""
@@ -242,27 +258,29 @@ class TestBatchHelpText:
     def test_batch_help_shows_examples(self):
         """Test batch help includes usage examples."""
         result = runner.invoke(app, ["batch", "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "$ longtext batch" in result.stdout or "Examples" in result.stdout
+        assert "$ longtext batch" in help_text or "Examples" in help_text
 
     def test_batch_help_shows_input_formats(self):
         """Test batch help explains input pattern formats."""
         result = runner.invoke(app, ["batch", "--help"])
+        help_text = _plain(result.stdout).lower()
 
         assert result.exit_code == 0
-        help_text = result.stdout.lower()
         assert ".glob" in help_text or "pattern" in help_text
         assert "comma" in help_text or "separate" in help_text
 
     def test_batch_help_shows_flags(self):
         """Test batch help documents all available flags."""
         result = runner.invoke(app, ["batch", "--help"])
+        help_text = _plain(result.stdout)
 
         assert result.exit_code == 0
-        assert "--config" in result.stdout
-        assert "--mode" in result.stdout
-        assert "--resume" in result.stdout
+        assert "--config" in help_text
+        assert "--mode" in help_text
+        assert "--resume" in help_text
 
 
 class TestBatchValidation:

@@ -144,6 +144,21 @@ def patch_pipeline_llm_client(mock_client):
                 return_value=mock_client,
             )
         )
+        # Patch OpenAICompatibleClient for AuditStage (it creates client directly)
+        stack.enter_context(
+            patch(
+                "src.longtext_pipeline.pipeline.audit.OpenAICompatibleClient",
+                return_value=mock_client,
+            )
+        )
+        # Set environment variable for API key
+        stack.enter_context(
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "mock-api-key-for-testing"},
+                clear=False,
+            )
+        )
         yield
 
 
@@ -180,7 +195,9 @@ def create_mock_llm_client(responses: dict, fail_after_calls: int = None):
     mock_client.complete.side_effect = complete_side_effect
     mock_client.acomplete = AsyncMock(side_effect=acomplete_side_effect)
     mock_client.acomplete_json = AsyncMock(return_value={"status": "ok"})
+    mock_client.complete_json = Mock(return_value={"status": "ok"})
     mock_client.model = "mock-model"
+    mock_client.context_window = 32000
     return mock_client
 
 

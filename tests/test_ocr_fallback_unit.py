@@ -90,11 +90,12 @@ def test_ocr_engine_uses_local_fallback_after_api_failure(tmp_path, monkeypatch)
     monkeypatch.setattr(
         ocr_module,
         "OCRAPIClient",
-        lambda api_token=None: SimpleNamespace(
+        lambda api_token=None, api_url=None: SimpleNamespace(
             convert_pdf_to_base64=lambda path: "b64",
             submit_to_api=lambda **kwargs: (_ for _ in ()).throw(
                 ocr_module.OCRAPIError("api unavailable")
             ),
+            extract_markdown_text=lambda result: "",
         ),
     )
     monkeypatch.setattr(
@@ -129,11 +130,12 @@ def test_ocr_engine_raises_when_local_fallback_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(
         ocr_module,
         "OCRAPIClient",
-        lambda api_token=None: SimpleNamespace(
+        lambda api_token=None, api_url=None: SimpleNamespace(
             convert_pdf_to_base64=lambda path: "b64",
             submit_to_api=lambda **kwargs: (_ for _ in ()).throw(
                 ocr_module.OCRAPIError("api unavailable")
             ),
+            extract_markdown_text=lambda result: "",
         ),
     )
 

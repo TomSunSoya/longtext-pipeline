@@ -70,7 +70,13 @@ class TestOCRAPIClient:
         # Mock successful response
         mock_response = Mock()
         mock_response.raise_for_status.return_value = None
-        mock_response.json.return_value = {"result": "extracted text"}
+        mock_response.json.return_value = {
+            "result": {
+                "layoutParsingResults": [
+                    {"markdown": {"text": "extracted text"}},
+                ]
+            }
+        }
         mock_response.status_code = 200
         mock_post.return_value = mock_response
 
@@ -78,20 +84,41 @@ class TestOCRAPIClient:
 
         result = client.submit_to_api("base64encoded", "general")
 
-        assert result == {"result": "extracted text"}
+        assert result == {
+            "result": {
+                "layoutParsingResults": [
+                    {"markdown": {"text": "extracted text"}},
+                ]
+            }
+        }
         mock_post.assert_called_once_with(
             "https://kbierdt4sav0zbee.aistudio-app.com/layout-parsing",
             headers={
                 "Content-Type": "application/json",
-                "Authorization": "Bearer test-token",
+                "Authorization": "token test-token",
             },
             json={
-                "pdf_content": "base64encoded",
-                "mode": "general",
-                "return_format": "markdown",
+                "file": "base64encoded",
+                "fileType": 0,
+                "useDocOrientationClassify": False,
+                "useDocUnwarping": False,
+                "useChartRecognition": False,
             },
             timeout=60.0,
         )
+
+    def test_extract_markdown_text_from_layout_results(self):
+        """Test extracting markdown text from Paddle layout parsing response."""
+        result = {
+            "result": {
+                "layoutParsingResults": [
+                    {"markdown": {"text": "page one"}},
+                    {"markdown": {"text": "page two"}},
+                ]
+            }
+        }
+
+        assert OCRAPIClient.extract_markdown_text(result) == "page one\n\npage two"
 
     @patch("httpx.post")
     def test_submit_to_api_timeout(self, mock_post):
@@ -159,8 +186,15 @@ class TestOCREngine:
                 mock_api_client = Mock()
                 mock_api_client.convert_pdf_to_base64.return_value = "base64_encoded"
                 mock_api_client.submit_to_api.return_value = {
-                    "result": "extracted OCR text!"
+                    "result": {
+                        "layoutParsingResults": [
+                            {"markdown": {"text": "extracted OCR text!"}}
+                        ]
+                    }
                 }
+                mock_api_client.extract_markdown_text.return_value = (
+                    "extracted OCR text!"
+                )
                 mock_api_client_class.return_value = mock_api_client
 
                 engine = OCREngine(config)
@@ -169,5 +203,45 @@ class TestOCREngine:
                     temp_path, threshold_token_ratio=0.01
                 )
                 assert "extracted OCR text" in result
+        finally:
+            os.remove(temp_path)
+
+    def test_extract_with_nested_ocr_config(self):
+        """Test that the engine accepts either full config or nested OCR config."""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"fake pdf content")
+            tmp.flush()
+            temp_path = tmp.name
+
+        try:
+            nested_config = {
+                "enabled": True,
+                "paddle_api_token": "test-token",
+                "use_local_fallback": False,
+            }
+
+            with patch(
+                "longtext_pipeline.pipeline.ocr_fallback.OCRAPIClient"
+            ) as mock_api_client_class:
+                mock_api_client = Mock()
+                mock_api_client.convert_pdf_to_base64.return_value = "base64_encoded"
+                mock_api_client.submit_to_api.return_value = {
+                    "result": {
+                        "layoutParsingResults": [
+                            {"markdown": {"text": "nested config OCR text"}}
+                        ]
+                    }
+                }
+                mock_api_client.extract_markdown_text.return_value = (
+                    "nested config OCR text"
+                )
+                mock_api_client_class.return_value = mock_api_client
+
+                engine = OCREngine(nested_config)
+                result = engine.extract_text_from_pdf(
+                    temp_path, threshold_token_ratio=0.01
+                )
+
+                assert result == "nested config OCR text"
         finally:
             os.remove(temp_path)

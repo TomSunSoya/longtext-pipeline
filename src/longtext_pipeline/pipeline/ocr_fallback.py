@@ -6,11 +6,11 @@ where pdfplumber cannot extract adequate text. It uses the PaddleOCR AI Studio A
 as primary option and falls back to local OCR with pytesseract.
 """
 
-import os
 import base64
 import logging
+import os
 from pathlib import Path
-from typing import Dict, Optional, Literal
+from typing import Any, Dict, Literal, Optional
 import httpx
 from ..errors import InputError
 
@@ -40,20 +40,22 @@ class OCRAPIError(Exception):
 class OCRAPIClient:
     """OCR API client for PaddleOCR AI Studio API service."""
 
-    def __init__(self, api_token: Optional[str] = None):
+    def __init__(self, api_token: Optional[str] = None, api_url: Optional[str] = None):
         """Initialize OCR API client.
 
         Args:
             api_token: PaddleOCR AI Studio API token, defaults to environment variable
+            api_url: PaddleOCR AI Studio API URL, defaults to environment variable
         """
         self.api_token = api_token or os.getenv("PADDLE_OCR_API_TOKEN")
         if not self.api_token:
             raise ValueError(
                 "PADDLE_OCR_API_TOKEN must be set as environment variable or passed as argument"
             )
-        self.api_url = os.getenv(
-            "PADDLE_OCR_API_URL",
-            "https://kbierdt4sav0zbee.aistudio-app.com/layout-parsing",
+        self.api_url = (
+            api_url
+            or os.getenv("PADDLE_OCR_API_URL")
+            or "https://kbierdt4sav0zbee.aistudio-app.com/layout-parsing"
         )
 
     def convert_pdf_to_base64(self, pdf_path: str) -> str:
@@ -77,20 +79,23 @@ class OCRAPIClient:
 
         Args:
             base64_pdf: Base64-encoded PDF content
-            mode: Processing mode (relationship vs general)
+            mode: Processing mode retained for compatibility with callers.
+                The current Paddle sync endpoint does not use this value.
 
         Returns:
             Dictionary with parsed response from OCR API
         """
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_token}",
+            "Authorization": f"token {self.api_token}",
         }
 
         payload = {
-            "pdf_content": base64_pdf,
-            "mode": mode,  # Could be used for different processing parameters
-            "return_format": "markdown",
+            "file": base64_pdf,
+            "fileType": 0,
+            "useDocOrientationClassify": False,
+            "useDocUnwarping": False,
+            "useChartRecognition": False,
         }
 
         try:
@@ -118,6 +123,42 @@ class OCRAPIClient:
             error_msg = f"Unexpected error during OCR API request: {str(e)}"
             logger.error(error_msg)
             raise OCRAPIError(error_msg)
+
+    @staticmethod
+    def extract_markdown_text(result: Dict[str, Any]) -> str:
+        """Extract combined markdown text from Paddle layout parsing response."""
+        result_root = result.get("result", result)
+
+        if isinstance(result_root, str):
+            return result_root
+
+        if not isinstance(result_root, dict):
+            return ""
+
+        layout_results = result_root.get("layoutParsingResults", [])
+        if isinstance(layout_results, list):
+            extracted_chunks: list[str] = []
+            for layout_result in layout_results:
+                if not isinstance(layout_result, dict):
+                    continue
+
+                markdown = layout_result.get("markdown", {})
+                if not isinstance(markdown, dict):
+                    continue
+
+                text = markdown.get("text", "")
+                if isinstance(text, str) and text.strip():
+                    extracted_chunks.append(text.strip())
+
+            if extracted_chunks:
+                return "\n\n".join(extracted_chunks)
+
+        for fallback_key in ("text", "content"):
+            fallback_value = result_root.get(fallback_key, "")
+            if isinstance(fallback_value, str):
+                return fallback_value
+
+        return ""
 
 
 class OCRLocalFallback:
@@ -203,13 +244,15 @@ class OCREngine:
         Args:
             config: Configuration dictionary for OCR options
         """
-        self.config = config or {}
-        self.api_failures_before_fallback = self.config.get("ocr", {}).get(
+        raw_config = config or {}
+        normalized_config = raw_config.get("ocr", raw_config)
+        self.ocr_config = (
+            normalized_config if isinstance(normalized_config, dict) else {}
+        )
+        self.api_failures_before_fallback = self.ocr_config.get(
             "api_failures_before_fallback", 1
         )
-        self.use_local_fallback = self.config.get("ocr", {}).get(
-            "use_local_fallback", True
-        )
+        self.use_local_fallback = self.ocr_config.get("use_local_fallback", True)
         self.current_api_failure_count = 0
 
     def extract_text_from_pdf(
@@ -247,11 +290,15 @@ class OCREngine:
             # Try API OCR first
             if self.current_api_failure_count < self.api_failures_before_fallback:
                 try:
-                    api_token = self.config.get("ocr", {}).get(
-                        "paddle_api_token"
-                    ) or os.getenv("PADDLE_OCR_API_TOKEN")
+                    api_token = self.ocr_config.get("paddle_api_token") or os.getenv(
+                        "PADDLE_OCR_API_TOKEN"
+                    )
                     if api_token:
-                        ocr_client = OCRAPIClient(api_token=api_token)
+                        api_url = self.ocr_config.get("paddle_api_url")
+                        ocr_client = OCRAPIClient(
+                            api_token=api_token,
+                            api_url=api_url if isinstance(api_url, str) else None,
+                        )
 
                         # Convert PDF to base64
                         base64_pdf = ocr_client.convert_pdf_to_base64(pdf_path)
@@ -262,16 +309,7 @@ class OCREngine:
                             mode=extraction_mode,  # type: ignore[arg-type]
                         )
 
-                        # Parse the returned content - expecting markdown or text in a specific field
-                        extracted_text = result.get(
-                            "result", result.get("data", result.get("text", ""))
-                        )
-                        if isinstance(extracted_text, dict):
-                            # Handle responses that have nested data structures
-                            if "text" in extracted_text:
-                                extracted_text = extracted_text["text"]
-                            elif "content" in extracted_text:
-                                extracted_text = extracted_text["content"]
+                        extracted_text = ocr_client.extract_markdown_text(result)
 
                         # Validate that API OCR produced meaningful text
                         if self._is_acceptable_ocr_result(extracted_text):

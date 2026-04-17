@@ -18,7 +18,6 @@ from src.longtext_pipeline.pipeline.orchestrator import LongtextPipeline
 from src.longtext_pipeline.manifest import ManifestManager
 from src.longtext_pipeline.models import FinalAnalysis
 from src.longtext_pipeline.llm.openai_compatible import OpenAICompatibleClient
-from src.longtext_pipeline.errors import InputError
 
 
 @contextmanager
@@ -651,29 +650,31 @@ class TestManifestIntegration:
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
-    def test_empty_input_handling(self, pipeline, temp_dir, sample_config):
+    def test_empty_input_handling(self, pipeline, temp_dir, monkeypatch):
         """Test that empty input file is handled gracefully."""
+        monkeypatch.chdir(temp_dir)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
         # Create empty input file
         input_path = Path(temp_dir) / "empty.txt"
         input_path.write_text("", encoding="utf-8")
 
-        # Run should handle empty input gracefully (return result or raise)
-        try:
-            pipeline.run(
-                input_path=str(input_path),
-                config_path=None,
-                mode="general",
-                resume=False,
-            )
-            # If no exception, should have manifest created
-            manifest_manager = ManifestManager()
-            manifest = manifest_manager.load_manifest(str(input_path))
-            assert manifest is not None
-            # Manifest should show failure
-            assert manifest.status in ["failed", "not_started"]
-        except (InputError, Exception) as e:
-            # Or exception should mention empty
-            assert "empty" in str(e).lower()
+        result = pipeline.run(
+            input_path=str(input_path),
+            config_path=None,
+            mode="general",
+            resume=False,
+        )
+
+        assert result is not None
+        assert result.status in ["failed", "partial_success"]
+
+        manifest_manager = ManifestManager()
+        manifest = manifest_manager.load_manifest(str(input_path))
+        assert manifest is not None
+        assert manifest.status == "failed"
+        assert manifest.stages["ingest"].status == "failed"
+        assert manifest.stages["ingest"].error is not None
 
     def test_tiny_input_handling(
         self, pipeline, temp_dir, sample_config, mock_llm_response

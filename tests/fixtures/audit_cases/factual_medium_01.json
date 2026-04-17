@@ -1,0 +1,21 @@
+{
+    "test_case_id": "factual_medium_01",
+    "original_text": "The document discusses人工智能 (Artificial Intelligence) applications.",
+    "llm_generated_output": "The document covers neural networks, deep learning frameworks, and transformer architectures.",
+    "hallucination_type": "factual",
+    "severity": "medium",
+    "expected_detection": true,
+    "detection_reason": "Added specific technical content not mentioned in source",
+    "detection_method": "content_verification",
+    "verification": {
+        "original_coverage": ["Artificial Intelligence"],
+        "generated_additions": ["neural networks", "deep learning frameworks", "transformer architectures"],
+        "added_claims": 3,
+        "unsubstantiated_additions": 2
+    },
+    "context": {
+        "input_length": 50,
+        "position_in_document": "Introduction",
+        "document_type": "Abstract"
+    }
+}

@@ -14,10 +14,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-
 from ..errors import LLMError, StageFailedError
 from ..grouper import SummaryGrouper
 from ..llm.factory import get_llm_client
+from ..llm.dispatcher import ParallelDispatcher, ParallelMode
 from ..manifest import ManifestManager
 from ..models import Manifest, StageSummary, Summary
 from ..utils.io import read_file, write_file
@@ -83,6 +83,8 @@ class StageSynthesisStage:
         prompt_template: str,
         client,
         model: str,
+        config: dict,
+        mode: str,
     ) -> StageSummary:
         """Synthesize a single group of summaries.
 
@@ -92,6 +94,8 @@ class StageSynthesisStage:
             prompt_template: Loaded prompt template
             client: LLM client instance
             model: Model name for metadata
+            config: Full configuration dictionary
+            mode: Analysis mode (general or relationship)
 
         Returns:
             StageSummary object with synthesized content and metadata
@@ -99,6 +103,27 @@ class StageSynthesisStage:
         Raises:
             LLMError: If LLM call fails
         """
+        if all(
+            summary.metadata.get("skipped", False)
+            or summary.content == "[Skipped - tiny input]"
+            for summary in group
+        ):
+            content_to_use = "\n\n".join(summary.content for summary in group)
+            timestamp = datetime.now()
+            return StageSummary(
+                stage_index=group_index,
+                summaries=group,
+                synthesis=content_to_use,
+                metadata={
+                    "generated_at": timestamp.isoformat(),
+                    "summary_count": len(group),
+                    "summary_indices": [s.part_index for s in group],
+                    "model": "local-skip",
+                    "estimated_tokens": estimate_tokens(content_to_use),
+                    "skipped_input": True,
+                },
+            )
+
         # Build combined summaries text
         summaries_text = ""
         for i, summary in enumerate(group):
@@ -108,25 +133,64 @@ class StageSynthesisStage:
         # Build full prompt by appending summaries content
         full_prompt = prompt_template + summaries_text
 
-        # Call LLM to generate synthesis (async)
-        response = await client.acomplete(full_prompt)
+        # Check if multi-provider configuration is available for this agent type
+        from ..config import get_agent_provider_configs
+
+        agent_provider_configs = get_agent_provider_configs(config, "stage_synthesizer")
+
+        # If we have multiple provider configurations, use parallel dispatcher
+        if len(agent_provider_configs) > 1:
+            # Create dispatcher with the configured providers
+            dispatcher = ParallelDispatcher()
+
+            # Determine mode based on config
+            dispatch_mode = ParallelMode.PARALLEL
+            if config.get("model", {}).get("dispatch_mode") == "fastest":
+                dispatch_mode = ParallelMode.FASTEST
+            elif config.get("model", {}).get("dispatch_mode") == "ranked":
+                dispatch_mode = ParallelMode.RANKED
+
+            # Use system prompt based on mode
+            system_prompt = self._get_system_prompt_for_mode(mode)
+
+            # Execute dispatch
+            result = await dispatcher.dispatch(
+                prompt=full_prompt,
+                system_prompt=system_prompt,
+                mode=dispatch_mode,
+                provider_configs=agent_provider_configs,
+            )
+
+            # Choose content based on mode
+            content_to_use = result.primary_content if result.primary_content else ""
+        else:
+            # Use traditional single client approach
+            response = await client.acomplete(full_prompt)
+            content_to_use = response
 
         # Parse response into StageSummary object
         timestamp = datetime.now()
         stage_summary = StageSummary(
             stage_index=group_index,
             summaries=group,
-            synthesis=response,
+            synthesis=content_to_use,
             metadata={
                 "generated_at": timestamp.isoformat(),
                 "summary_count": len(group),
                 "summary_indices": [s.part_index for s in group],
                 "model": model,
-                "estimated_tokens": estimate_tokens(response),
+                "estimated_tokens": estimate_tokens(content_to_use),
             },
         )
 
         return stage_summary
+
+    def _get_system_prompt_for_mode(self, mode: str) -> Optional[str]:
+        """Get appropriate system prompt based on mode."""
+        if mode == "relationship":
+            return "You are synthesizing multiple summaries to highlight relationships between entities across different sections of the text. Focus on connecting related concepts."
+        else:
+            return "You are synthesizing multiple summaries to form a coherent high-level understanding. Connect key themes and maintain consistency."
 
     def _save_stage_summary(self, stage_summary: StageSummary, output_dir: Path) -> str:
         """Save stage summary to file and return path.
@@ -206,12 +270,15 @@ _Stage synthesized by {model} ({timestamp})_
         group_size = config.get("stages", {}).get("stage", {}).get("group_size", 5)
         logger.info("Stage synthesis using group_size=%s", group_size)
 
-        # Create LLM client using agent-specific model config for stage_synthesizer
-        client = get_llm_client(config, agent_type="stage_synthesizer")
-        model = getattr(client, "model", "unknown")
-
-        output_dir = Path(manifest.input_path).parent / ".longtext"
-        output_dir.mkdir(exist_ok=True)
+        # Determine output directory from config or use default .longtext/
+        output_dir_config = config.get("output", {}).get("dir")
+        if output_dir_config:
+            # Use configured output directory
+            output_dir = Path(output_dir_config) / ".longtext"
+        else:
+            # Default: adjacent .longtext/ directory
+            output_dir = Path(manifest.input_path).parent / ".longtext"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         max_workers = config.get("pipeline", {}).get("max_workers", 4)
         semaphore = asyncio.Semaphore(max_workers)
@@ -225,6 +292,22 @@ _Stage synthesized by {model} ({timestamp})_
             len(groups),
             len(summaries),
         )
+
+        needs_llm = any(
+            not all(
+                summary.metadata.get("skipped", False)
+                or summary.content == "[Skipped - tiny input]"
+                for summary in group
+            )
+            for group in groups
+        )
+        if needs_llm:
+            # Create LLM client using agent-specific model config for stage_synthesizer
+            client = get_llm_client(config, agent_type="stage_synthesizer")
+            model = getattr(client, "model", "unknown")
+        else:
+            client = None
+            model = "local-skip"
 
         # Handle empty summaries list - nothing to synthesize
         if not groups:
@@ -256,6 +339,7 @@ _Stage synthesized by {model} ({timestamp})_
             mode=mode,
             output_dir=output_dir,
             semaphore=semaphore,
+            config=config,  # Added config parameter to support multi-providers
         )
 
         # Schedule all groups for concurrent execution within semaphore limit
@@ -288,6 +372,7 @@ _Stage synthesized by {model} ({timestamp})_
             "stages_total": total_groups,
             "errors": errors,
             "saved_stages": saved_stage_paths,
+            "output_dir_used": str(output_dir),
         }
 
         # Determine stage status
@@ -337,6 +422,7 @@ _Stage synthesized by {model} ({timestamp})_
         mode: str,
         output_dir: Path,
         semaphore: asyncio.Semaphore,
+        config: dict,
     ):
         """Create a closure for processing groups with captured context."""
 
@@ -354,6 +440,8 @@ _Stage synthesized by {model} ({timestamp})_
                         prompt_template=prompt_template,
                         client=client,
                         model=model,
+                        config=config,
+                        mode=mode,
                     )
                     stage_summary.metadata["mode"] = mode
                     stage_path = self._save_stage_summary(stage_summary, output_dir)

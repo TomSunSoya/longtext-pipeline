@@ -1,0 +1,23 @@
+{
+    "test_case_id": "numerical_low_01",
+    "original_text": "The system processed 1000 characters.",
+    "llm_generated_output": "The document contained 987 characters.",
+    "hallucination_type": "numerical",
+    "severity": "low",
+    "expected_detection": true,
+    "detection_reason": "Minor precision change (exact vs rounded)",
+    "detection_method": "numerical_verification",
+    "verification": {
+        "original_value": 1000,
+        "generated_value": 987,
+        "difference": 13,
+        "relative_error": 0.013,
+        "threshold": 0.05,
+        "within_threshold": true
+    },
+    "context": {
+        "input_length": 200,
+        "position_in_document": "Metadata Section",
+        "document_type": "Technical Report"
+    }
+}

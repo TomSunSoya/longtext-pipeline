@@ -68,6 +68,18 @@ class LongtextPipeline:
         self.manifest_manager = ManifestManager()
         self.error_aggregator = ErrorAggregator()
 
+    @staticmethod
+    def _mark_manifest_completed_unless_degraded(manifest: Manifest) -> None:
+        """Mark the manifest completed unless an earlier stage already degraded it."""
+        if manifest.status in {
+            "completed_with_issues",
+            "partial_success",
+            "failed",
+            "interrupted",
+        }:
+            return
+        manifest.status = "completed"
+
     def run(
         self,
         input_path: str,
@@ -77,18 +89,21 @@ class LongtextPipeline:
         multi_perspective: bool = False,
         specialist_count: Optional[int] = None,
         max_workers: Optional[int] = None,
+        output_dir_override: Optional[str] = None,
     ) -> FinalAnalysis:
         """
         Execute the entire processing pipeline from input to final analysis.
 
         Args:
-            input_path: Path to input file (supports txt/md)
+            input_path: Path to input file (supports txt, md, pdf, and docx)
             config_path: Optional path to config file (uses defaults if None)
             mode: Analysis mode ("general" or "relationship")
             resume: Whether to resume from existing checkpoints
             multi_perspective: Whether to use multi-perspective parallel specialist agents
             specialist_count: Optional number of final-analysis specialist agents to run
             max_workers: Optional maximum concurrent workers for summarize and stage stages
+            output_dir_override: Optional override for output directory (used in batch mode
+                                to create namespaced subdirectories for each input file)
 
         Returns:
             FinalAnalysis object with results and error tracking
@@ -127,6 +142,25 @@ class LongtextPipeline:
             if specialist_count is not None:
                 config.setdefault("pipeline", {})
                 config["pipeline"]["specialist_count"] = specialist_count
+
+            # 2.2 Determine output directory from config or override
+            # Priority: output_dir_override > config.output.dir > default (input-adjacent)
+            if output_dir_override:
+                # Use the override (typically namespaced in batch mode)
+                output_dir = Path(output_dir_override)
+            else:
+                # Fall back to config's output.dir setting
+                output_dir_config = config.get("output", {}).get("dir")
+                if output_dir_config:
+                    output_dir = Path(output_dir_config)
+                else:
+                    output_dir = None  # Will default to adjacent .longtext/
+
+            # Stages write outputs based on config.output.dir, so propagate any runtime
+            # override there to keep stage writes and resume reads aligned.
+            if output_dir is not None:
+                config.setdefault("output", {})
+                config["output"]["dir"] = str(output_dir)
 
             # 3. Initialize manifest manager
             manifest_manager = self.manifest_manager
@@ -215,7 +249,9 @@ class LongtextPipeline:
                             )
                 else:
                     # Load parts from existing files based on manifest info
-                    parts = self._load_parts_from_existing_files(manifest, input_path)
+                    parts = self._load_parts_from_existing_files(
+                        manifest, input_path, output_dir
+                    )
                     logger.info(
                         "Resume loaded %s parts from existing files", len(parts)
                     )
@@ -273,7 +309,7 @@ class LongtextPipeline:
                 else:
                     # Load existing summaries
                     all_summaries = self._load_summaries_from_existing_files(
-                        manifest, input_path
+                        manifest, input_path, output_dir
                     )
                     logger.info(
                         "Resume loaded %s summaries from existing files",
@@ -333,7 +369,7 @@ class LongtextPipeline:
                 else:
                     # Load existing stages
                     all_stages = self._load_stages_from_existing_files(
-                        manifest, input_path
+                        manifest, input_path, output_dir
                     )
                     logger.info(
                         "Resume loaded %s stages from existing files", len(all_stages)
@@ -404,7 +440,9 @@ class LongtextPipeline:
 
                 else:
                     logger.info("Skipping final stage because it is already completed")
-                    final_analysis = self._load_final_analysis_from_file(input_path)
+                    final_analysis = self._load_final_analysis_from_file(
+                        input_path, output_dir
+                    )
                     # Update manifest to ensure stage is marked as complete
                     self.manifest_manager.update_stage(
                         manifest,
@@ -412,7 +450,7 @@ class LongtextPipeline:
                         "successful",
                         output_file=f"final_analysis.md for {Path(input_path).name}",
                     )
-                    manifest.status = "completed"
+                    self._mark_manifest_completed_unless_degraded(manifest)
 
                 # STAGE 5: AUDIT (conditional)
                 current_stage = "audit"
@@ -452,6 +490,7 @@ class LongtextPipeline:
                                 "report_path": audit_data.get("report_path"),
                             },
                         )
+                        self._mark_manifest_completed_unless_degraded(manifest)
                     else:
                         logger.warning(
                             "Audit stage encountered errors or produced partial results"
@@ -484,6 +523,7 @@ class LongtextPipeline:
                             output_file="audit_report.md",
                             stats=audit_stage_info.stats,
                         )
+                        self._mark_manifest_completed_unless_degraded(manifest)
                     else:
                         self.manifest_manager.update_stage(
                             manifest,
@@ -491,6 +531,7 @@ class LongtextPipeline:
                             "successful",
                             output_file="audit_report.md",
                         )
+                        self._mark_manifest_completed_unless_degraded(manifest)
 
             except Exception as e:
                 error_msg = f"{current_stage} stage failed with error: {str(e)}"
@@ -571,10 +612,15 @@ class LongtextPipeline:
                     )
 
                     # Export metrics to Prometheus format after pipeline completion
-                    output_dir = Path(input_path).parent
-                    write_metrics_to_file(output_dir)
+                    # Use configured output directory or default to adjacent .longtext/
+                    output_dir_config = config.get("output", {}).get("dir")
+                    if output_dir_config:
+                        metrics_output_dir = Path(output_dir_config) / ".longtext"
+                    else:
+                        metrics_output_dir = Path(input_path).parent / ".longtext"
+                    write_metrics_to_file(metrics_output_dir)
                     logger.info(
-                        "Metrics exported to %s/.longtext/metrics.prom", output_dir
+                        "Metrics exported to %s/metrics.prom", metrics_output_dir
                     )
             except Exception:
                 logger.exception(
@@ -608,17 +654,22 @@ class LongtextPipeline:
         if not os.access(path, os.R_OK):
             raise PermissionError(f"Cannot read input file: {input_path}")
 
-        # Check extension (only txt/md supported)
+        # Check extension
         ext = path.suffix.lower()
-        if ext not in [".txt", ".md"]:
+        if ext not in [".txt", ".md", ".pdf", ".docx"]:
             raise ValueError(
-                f"Unsupported file format. Only .txt and .md files are supported, got: {ext}"
+                "Unsupported file format. Only .txt, .md, .pdf, and .docx files "
+                f"are supported, got: {ext}"
             )
 
         return str(path)
 
     def _get_run_lock_path(self, input_path: str) -> Path:
-        """Build a per-input lock path inside the adjacent .longtext directory."""
+        """Build a per-input lock path inside the adjacent .longtext directory.
+
+        Lock files ALWAYS remain input-adjacent, regardless of output_dir_override.
+        This ensures resume and status work correctly even with namespaced outputs.
+        """
         resolved_input = Path(input_path).resolve()
         lock_id = hashlib.sha256(str(resolved_input).encode("utf-8")).hexdigest()[:16]
         return (
@@ -781,11 +832,15 @@ class LongtextPipeline:
         return result
 
     def _load_parts_from_existing_files(
-        self, manifest: Manifest, input_path: str
+        self, manifest: Manifest, input_path: str, output_dir: Optional[Path] = None
     ) -> List[Part]:
         """Load parts from existing part files referenced in manifest."""
         try:
-            parts_dir = Path(input_path).parent / ".longtext"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                parts_dir = output_dir / ".longtext"
+            else:
+                parts_dir = Path(input_path).parent / ".longtext"
             parts = []
 
             i = 0
@@ -832,11 +887,15 @@ class LongtextPipeline:
             return []
 
     def _load_summaries_from_existing_files(
-        self, manifest: Manifest, input_path: str
+        self, manifest: Manifest, input_path: str, output_dir: Optional[Path] = None
     ) -> list:
         """Load existing summaries from summary files."""
         try:
-            summaries_dir = Path(input_path).parent / ".longtext"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                summaries_dir = output_dir / ".longtext"
+            else:
+                summaries_dir = Path(input_path).parent / ".longtext"
             summaries = []
             from ..models import Summary
 
@@ -869,11 +928,15 @@ class LongtextPipeline:
             return []
 
     def _load_stages_from_existing_files(
-        self, manifest: Manifest, input_path: str
+        self, manifest: Manifest, input_path: str, output_dir: Optional[Path] = None
     ) -> list:
         """Load existing stage summaries from stage files."""
         try:
-            stages_dir = Path(input_path).parent / ".longtext"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                stages_dir = output_dir / ".longtext"
+            else:
+                stages_dir = Path(input_path).parent / ".longtext"
             stages = []
             from ..models import StageSummary
 
@@ -906,10 +969,17 @@ class LongtextPipeline:
             logger.exception("Failed to load existing stages")
             return []
 
-    def _load_final_analysis_from_file(self, input_path: str) -> FinalAnalysis:
+    def _load_final_analysis_from_file(
+        self, input_path: str, output_dir: Optional[Path] = None
+    ) -> FinalAnalysis:
         """Load existing final analysis from file."""
         try:
-            final_path = Path(input_path).parent / ".longtext" / "final_analysis.md"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                load_output_dir = output_dir / ".longtext"
+            else:
+                load_output_dir = Path(input_path).parent / ".longtext"
+            final_path = load_output_dir / "final_analysis.md"
             if final_path.exists():
                 from ..utils.io import read_file
 
@@ -939,12 +1009,18 @@ class LongtextPipeline:
                 metadata={"error": str(e)},
             )
 
-    def _save_summaries_to_files(self, summaries: list, input_path: str):
+    def _save_summaries_to_files(
+        self, summaries: list, input_path: str, output_dir: Optional[Path] = None
+    ):
         """Save summaries to file system."""
         try:
             from ..renderer import render_summary
 
-            parts_dir = Path(input_path).parent / ".longtext"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                parts_dir = output_dir / ".longtext"
+            else:
+                parts_dir = Path(input_path).parent / ".longtext"
 
             for summary_obj in summaries:
                 summary_path = parts_dir / f"summary_{summary_obj.part_index:02d}.md"
@@ -961,12 +1037,18 @@ class LongtextPipeline:
         except Exception:
             logger.exception("Failed to save summaries")
 
-    def _save_stages_to_files(self, stages: list, input_path: str):
+    def _save_stages_to_files(
+        self, stages: list, input_path: str, output_dir: Optional[Path] = None
+    ):
         """Save stages to file system."""
         try:
             from ..renderer import render_stage
 
-            parts_dir = Path(input_path).parent / ".longtext"
+            # Use provided output_dir or default to adjacent .longtext/
+            if output_dir:
+                parts_dir = output_dir / ".longtext"
+            else:
+                parts_dir = Path(input_path).parent / ".longtext"
 
             for stage_obj in stages:
                 stage_path = parts_dir / f"stage_{stage_obj.stage_index:02d}.md"

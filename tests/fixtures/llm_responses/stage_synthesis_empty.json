@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_005_stage_synthesis_empty",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 200,
+    "completion_tokens": 100,
+    "total_tokens": 300,
+    "timestamp": "2026-04-14T10:40:00Z",
+    "response": {
+        "content": "No summaries to aggregate. This document may be empty or contain only minimal content. Consider processing with different parameters or updating the input.",
+        "finish_reason": "stop",
+        "logprobs": null
+    }
+}

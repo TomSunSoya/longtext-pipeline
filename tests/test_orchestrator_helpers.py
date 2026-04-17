@@ -36,12 +36,17 @@ def _make_manifest(input_path: str) -> Manifest:
     )
 
 
-def test_validate_input_file_accepts_txt_and_rejects_missing(tmp_path):
+@pytest.mark.parametrize("extension", [".txt", ".md", ".pdf", ".docx"])
+def test_validate_input_file_accepts_supported_extensions(tmp_path, extension):
     pipeline = LongtextPipeline()
-    input_file = tmp_path / "input.txt"
+    input_file = tmp_path / f"input{extension}"
     input_file.write_text("body", encoding="utf-8")
 
     assert pipeline._validate_input_file(str(input_file)) == str(input_file.resolve())
+
+
+def test_validate_input_file_rejects_missing_file(tmp_path):
+    pipeline = LongtextPipeline()
 
     with pytest.raises(FileNotFoundError):
         pipeline._validate_input_file(str(tmp_path / "missing.txt"))
@@ -49,11 +54,78 @@ def test_validate_input_file_accepts_txt_and_rejects_missing(tmp_path):
 
 def test_validate_input_file_rejects_unsupported_extension(tmp_path):
     pipeline = LongtextPipeline()
-    input_file = tmp_path / "input.pdf"
+    input_file = tmp_path / "input.rtf"
     input_file.write_text("body", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Unsupported file format"):
         pipeline._validate_input_file(str(input_file))
+
+
+def test_run_propagates_output_dir_override_to_stage_config(tmp_path, monkeypatch):
+    pipeline = LongtextPipeline()
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("body", encoding="utf-8")
+    output_dir = tmp_path / "artifacts"
+    seen_output_dir = {}
+
+    class _Lock:
+        lock_path = "dummy.lock"
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(
+        pipeline,
+        "_load_and_validate_config",
+        lambda config_path, mode: {
+            "output": {"dir": "ignored"},
+            "stages": {"audit": {"enabled": False}},
+        },
+    )
+    monkeypatch.setattr(pipeline, "_acquire_run_lock", lambda _: _Lock())
+    monkeypatch.setattr(
+        "src.longtext_pipeline.pipeline.orchestrator.write_metrics_to_file",
+        lambda _: None,
+    )
+
+    def fake_ingest(input_path, config, manifest):
+        seen_output_dir["value"] = config["output"]["dir"]
+        return [Part(index=0, content="body", token_count=1)]
+
+    monkeypatch.setattr(pipeline, "_run_ingest_stage", fake_ingest)
+    monkeypatch.setattr(
+        pipeline,
+        "_run_summarize_stage",
+        lambda parts, config, manifest, mode: [
+            Summary(part_index=0, content="summary")
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_stage_synthesis_stage",
+        lambda summaries, config, manifest, mode: [
+            StageSummary(stage_index=0, summaries=summaries, synthesis="stage")
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_final_analysis_stage",
+        lambda stages, config, manifest, mode: FinalAnalysis(
+            status="completed",
+            stages=stages,
+            final_result="final",
+            metadata={},
+        ),
+    )
+
+    result = pipeline.run(
+        str(input_file),
+        resume=False,
+        output_dir_override=str(output_dir),
+    )
+
+    assert result.status == "completed"
+    assert seen_output_dir["value"] == str(output_dir)
 
 
 def test_load_and_validate_config_updates_relationship_prompts():

@@ -30,6 +30,8 @@ def test_find_auto_config_path_searches_parent_directories(tmp_path, monkeypatch
 
 def test_load_runtime_config_merges_explicit_and_local_config(tmp_path, monkeypatch):
     """Explicit pipeline config should merge with local machine config."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
     explicit_config = tmp_path / "config.general.yaml"
     explicit_config.write_text(
         "stages:\n  ingest:\n    chunk_size: 1234\nmodel:\n  name: gpt-4o-mini\n",

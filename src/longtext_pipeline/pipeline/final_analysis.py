@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from ..errors import LLMError
 from ..llm.factory import get_llm_client
+from ..llm.dispatcher import ParallelDispatcher, ParallelMode
 from ..manifest import ManifestManager
 from ..models import FinalAnalysis, Manifest, StageSummary
 from ..utils.io import read_file, write_file
@@ -84,6 +85,7 @@ class FinalAnalysisStage:
             manifest_manager: Optional existing manifest manager
         """
         self.manifest_manager = manifest_manager or ManifestManager()
+        self._runtime_config: Dict[str, Any] | None = None
 
     def _load_prompt_template(self, mode: str) -> str:
         """Load prompt template from file based on mode."""
@@ -118,6 +120,18 @@ class FinalAnalysisStage:
             combined += f"\n\n--- Stage {i} (Index {stage_summary.stage_index}) ---\n"
             combined += stage_summary.synthesis
         return combined
+
+    def _all_stage_summaries_skipped(self, stage_summaries: List[StageSummary]) -> bool:
+        """Return True when every stage summary comes from tiny-input skip flow."""
+        return bool(stage_summaries) and all(
+            stage_summary.metadata.get("skipped_input", False)
+            or stage_summary.synthesis == "[Skipped - tiny input]"
+            or all(
+                summary.metadata.get("skipped", False)
+                for summary in stage_summary.summaries
+            )
+            for stage_summary in stage_summaries
+        )
 
     def _get_selected_specialists(self, config: Dict) -> List[str]:
         """Return the ordered list of specialist agents selected for this run."""
@@ -177,8 +191,9 @@ class FinalAnalysisStage:
         analyst_type: str,
         stage_summaries: List[StageSummary],
         prompt_template: str,
-        client,
-        model: str,
+        client=None,
+        model: str = "unknown",
+        config: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Generate a specialist analysis using LLM asynchronously.
 
@@ -186,21 +201,90 @@ class FinalAnalysisStage:
             analyst_type: Key into _SPECIALIST_DEFINITIONS
             stage_summaries: List of StageSummary objects to synthesize
             prompt_template: Loaded prompt template
-            client: LLM client instance
+            client: Optional pre-built client for this specialist
             model: Model name for metadata
+            config: Optional full configuration including multi-provider settings
 
         Returns:
             Dictionary with analysis results (always returns, never raises)
         """
         prompt_suffix = _SPECIALIST_DEFINITIONS[analyst_type]
+
         try:
             full_prompt = self._build_specialist_prompt(
                 prompt_template, prompt_suffix, stage_summaries
             )
-            response = await client.acomplete(full_prompt)
+
+            # Check if multi-provider configuration is available for this analyst type
+            from ..config import get_agent_provider_configs
+
+            effective_config = config or self._runtime_config
+            agent_provider_configs = (
+                get_agent_provider_configs(effective_config, analyst_type)
+                if effective_config
+                else []
+            )
+
+            # Determine appropriate client to use based on provider config
+            if (
+                client is None
+                and agent_provider_configs
+                and len(agent_provider_configs) > 1
+            ):
+                # Use parallel dispatcher for multi-providers
+                dispatcher = ParallelDispatcher()
+
+                # Determine mode based on config
+                dispatch_mode = ParallelMode.PARALLEL
+                if (
+                    effective_config
+                    and effective_config.get("model", {}).get("dispatch_mode")
+                    == "fastest"
+                ):
+                    dispatch_mode = ParallelMode.FASTEST
+                elif (
+                    effective_config
+                    and effective_config.get("model", {}).get("dispatch_mode")
+                    == "ranked"
+                ):
+                    dispatch_mode = ParallelMode.RANKED
+
+                # Use system prompt for mode - reuse generic one for analysts
+                system_prompt = self._get_system_prompt_for_mode("general")
+
+                result = await dispatcher.dispatch(
+                    prompt=full_prompt,
+                    system_prompt=system_prompt,
+                    mode=dispatch_mode,
+                    provider_configs=agent_provider_configs,
+                )
+
+                response = result.primary_content if result.primary_content else ""
+
+                # Determine model name for multi-providers
+                model_names = [
+                    cfg.get("name", "unknown") for cfg in agent_provider_configs
+                ]
+                effective_model = f"multi({','.join(model_names[:3])})" + (
+                    "..." if len(model_names) > 3 else ""
+                )
+            else:
+                # Use traditional single client approach
+                specialist_client = client
+                if specialist_client is None:
+                    if effective_config is None:
+                        raise ValueError(
+                            "config is required when no client is provided."
+                        )
+                    specialist_client = get_llm_client(
+                        effective_config, agent_type=analyst_type
+                    )
+                response = await specialist_client.acomplete(full_prompt)
+                effective_model = getattr(specialist_client, "model", model)
+
             return {
                 "analyst_type": analyst_type,
-                "model_used": model,
+                "model_used": effective_model,
                 "analysis": response,
                 "timestamp": datetime.now().isoformat(),
                 "status": "completed",
@@ -216,17 +300,25 @@ class FinalAnalysisStage:
                 "status": "failed",
             }
 
+    def _get_system_prompt_for_mode(self, mode: str) -> Optional[str]:
+        """Get appropriate system prompt based on mode."""
+        if mode == "relationship":
+            return "You are analyzing the provided content for relationships and connections between entities, focusing on key interdependencies."
+        else:
+            return "You are analyzing the provided content for key themes, concepts and insights."
+
     async def _aggregate_with_meta_agent(
         self,
         specialist_results: List[Dict[str, Any]],
-        client,
-        model: str,
+        client=None,
+        model: str = "unknown",
+        config: Optional[dict] = None,
     ) -> str:
         """Aggregate specialist results using a meta-agent LLM call.
 
         Args:
             specialist_results: List of completed specialist analysis dicts
-            client: LLM client instance for the meta-agent
+            config: Configuration dictionary for multi-provider settings
             model: Model name
 
         Returns:
@@ -273,23 +365,75 @@ class FinalAnalysisStage:
             "5. Is organized in clearly separated sections with cross-references"
         )
 
-        try:
-            response = await client.acomplete(meta_prompt)
-            return f"# Multi-Perspective Integrated Analysis\n\n{response}"
-        except Exception as e:
-            logger.warning(
-                "[MetaAgent] LLM aggregation failed (%s), falling back to concatenation",
-                e,
-                exc_info=True,
+        # Check and handle multi-provider dispatch for meta-aggregation
+        from ..config import get_agent_provider_configs
+
+        effective_config = config or self._runtime_config
+        agent_provider_configs = (
+            get_agent_provider_configs(effective_config, "analyst")
+            if effective_config
+            else []
+        )
+
+        if (
+            client is None
+            and agent_provider_configs
+            and len(agent_provider_configs) > 1
+        ):
+            # Use parallel dispatcher for multi-providers
+            dispatcher = ParallelDispatcher()
+
+            # Determine mode based on config
+            dispatch_mode = ParallelMode.PARALLEL
+            if (
+                effective_config
+                and effective_config.get("model", {}).get("dispatch_mode") == "fastest"
+            ):
+                dispatch_mode = ParallelMode.FASTEST
+            elif (
+                effective_config
+                and effective_config.get("model", {}).get("dispatch_mode") == "ranked"
+            ):
+                dispatch_mode = ParallelMode.RANKED
+
+            # Execute dispatch
+            result = await dispatcher.dispatch(  # type: ignore[assignment]
+                prompt=meta_prompt,
+                mode=dispatch_mode,
+                provider_configs=agent_provider_configs,
             )
-            # Fallback: concatenate specialist results without LLM
-            fallback = "# Multi-Perspective Integrated Analysis\n\n"
-            if unavailable_perspectives:
-                fallback += "## Missing Perspectives\n"
-                fallback += "\n".join(unavailable_perspectives)
-                fallback += "\n\n"
-            fallback += specialist_context
-            return fallback
+
+            aggregated_content = (
+                result.primary_content if result.primary_content else ""  # type: ignore[attr-defined]
+            )
+        else:
+            # Use traditional single client approach
+            try:
+                if client is None:
+                    if effective_config is None:
+                        raise ValueError(
+                            "config is required when no client is provided."
+                        )
+                    client = get_llm_client(effective_config, agent_type="analyst")
+                response = await client.acomplete(meta_prompt)
+                aggregated_content = (
+                    f"# Multi-Perspective Integrated Analysis\n\n{response}"
+                )
+            except Exception as e:
+                logger.warning(
+                    "[MetaAgent] LLM aggregation failed (%s), falling back to concatenation",
+                    e,
+                    exc_info=True,
+                )
+                # Fallback: concatenate specialist results without LLM
+                aggregated_content = "# Multi-Perspective Integrated Analysis\n\n"
+                if unavailable_perspectives:
+                    aggregated_content += "## Missing Perspectives\n"
+                    aggregated_content += "\n".join(unavailable_perspectives)
+                    aggregated_content += "\n\n"
+                aggregated_content += specialist_context
+
+        return aggregated_content
 
     async def _run_multi_perspective(
         self,
@@ -300,29 +444,51 @@ class FinalAnalysisStage:
     ) -> FinalAnalysis:
         """Run multi-perspective parallel analysis with specialist agents."""
         prompt_template = self._load_prompt_template(mode)
+        self._runtime_config = config
         selected_specialists = self._get_selected_specialists(config)
         specialist_concurrency = self._get_specialist_concurrency_limit(
             config, selected_specialists
         )
         semaphore = asyncio.Semaphore(specialist_concurrency)
 
-        async def run_specialist(
-            analyst_type: str, client, model: str
-        ) -> Dict[str, Any]:
+        from ..config import get_agent_provider_configs
+
+        specialist_clients: dict[str, Any | None] = {}
+        specialist_models: dict[str, str] = {}
+        for analyst_type in selected_specialists:
+            agent_provider_configs = get_agent_provider_configs(config, analyst_type)
+            if agent_provider_configs and len(agent_provider_configs) > 1:
+                specialist_clients[analyst_type] = None
+                specialist_models[analyst_type] = "multi-provider"
+            else:
+                specialist_client = get_llm_client(config, agent_type=analyst_type)
+                specialist_clients[analyst_type] = specialist_client
+                specialist_models[analyst_type] = getattr(
+                    specialist_client, "model", analyst_type
+                )
+
+        meta_provider_configs = get_agent_provider_configs(config, "analyst")
+        if meta_provider_configs and len(meta_provider_configs) > 1:
+            meta_client = None
+            meta_model = "multi-agent"
+        else:
+            meta_client = get_llm_client(config, agent_type="analyst")
+            meta_model = getattr(meta_client, "model", "unknown")
+
+        async def run_specialist(analyst_type: str) -> Dict[str, Any]:
             async with semaphore:
                 return await self._generate_specialist_analysis(
-                    analyst_type, stage_summaries, prompt_template, client, model
+                    analyst_type,
+                    stage_summaries,
+                    prompt_template,
+                    specialist_clients[analyst_type],
+                    specialist_models[analyst_type],
                 )
 
         # Create one client per specialist (may route to different models)
         tasks = []
         for analyst_type in selected_specialists:
-            try:
-                client = get_llm_client(config, agent_type=analyst_type)
-            except Exception:
-                client = get_llm_client(config, agent_type="analyst")
-            model = getattr(client, "model", "unknown")
-            tasks.append(run_specialist(analyst_type, client, model))
+            tasks.append(run_specialist(analyst_type))
 
         logger.info(
             "[FinalAnalysisStage] Running %d specialist agents in parallel (max concurrency=%d)",
@@ -347,10 +513,10 @@ class FinalAnalysisStage:
             return await self._run_single_pass(stage_summaries, config, manifest, mode)
 
         # Aggregate via meta-agent
-        meta_client = get_llm_client(config, agent_type="analyst")
-        meta_model = getattr(meta_client, "model", "unknown")
         final_result = await self._aggregate_with_meta_agent(
-            results, meta_client, meta_model
+            results,
+            meta_client,
+            meta_model,
         )
 
         timestamp = datetime.now()
@@ -389,22 +555,84 @@ class FinalAnalysisStage:
     ) -> FinalAnalysis:
         """Run single-pass analysis using one LLM call.
 
+        NOTE: This method now supports multi-provider if configured, with backwards compatibility.
+
         Raises LLMError on LLM failure so the caller (run()) can handle it.
         """
         prompt_template = self._load_prompt_template(mode)
-        client = get_llm_client(config, agent_type="analyst")
-        model = getattr(client, "model", "unknown")
+
+        # Determine if multi-provider or single provider should be used
+        from ..config import get_agent_provider_configs
+
+        agent_provider_configs = get_agent_provider_configs(config, "analyst")
 
         logger.info(
             "[FinalAnalysisStage] Generating final synthesis from %d stage summaries...",
             len(stage_summaries),
         )
 
+        if self._all_stage_summaries_skipped(stage_summaries):
+            response = "\n\n".join(
+                stage_summary.synthesis for stage_summary in stage_summaries
+            )
+            effective_model = "local-skip"
+            timestamp = datetime.now()
+            return FinalAnalysis(
+                status="completed",
+                stages=stage_summaries,
+                final_result=response,
+                metadata={
+                    "generated_at": timestamp.isoformat(),
+                    "stage_count": len(stage_summaries),
+                    "stage_indices": [s.stage_index for s in stage_summaries],
+                    "model": effective_model,
+                    "estimated_tokens": estimate_tokens(response),
+                    "mode": mode,
+                    "multi_perspective_analysis": False,
+                    "skipped_input": True,
+                },
+            )
+
         combined_context = self._build_combined_context(stage_summaries)
         full_prompt = prompt_template + combined_context
 
-        # Let LLMError propagate so run() can handle it properly
-        response = await client.acomplete(full_prompt)
+        # Use multi-provider if configured
+        if agent_provider_configs and len(agent_provider_configs) > 1:
+            # Create dispatcher with the configured providers
+            dispatcher = ParallelDispatcher()
+
+            # Determine mode based on config
+            dispatch_mode = ParallelMode.PARALLEL
+            if config.get("model", {}).get("dispatch_mode") == "fastest":
+                dispatch_mode = ParallelMode.FASTEST
+            elif config.get("model", {}).get("dispatch_mode") == "ranked":
+                dispatch_mode = ParallelMode.RANKED
+
+            # Use system prompt based on mode
+            system_prompt = self._get_system_prompt_for_mode(mode)
+
+            # Execute dispatch
+            result = await dispatcher.dispatch(
+                prompt=full_prompt,
+                system_prompt=system_prompt,
+                mode=dispatch_mode,
+                provider_configs=agent_provider_configs,
+            )
+
+            response = result.primary_content if result.primary_content else ""
+
+            # Determine model name for multi-providers
+            model_names = [cfg.get("name", "unknown") for cfg in agent_provider_configs]
+            effective_model = f"multi({','.join(model_names[:3])})" + (
+                "..." if len(model_names) > 3 else ""
+            )
+        else:
+            # Use traditional single client approach
+            client = get_llm_client(config, agent_type="analyst")
+            effective_model = getattr(client, "model", "unknown")
+
+            # Let LLMError propagate so run() can handle it properly
+            response = await client.acomplete(full_prompt)
 
         timestamp = datetime.now()
         return FinalAnalysis(
@@ -415,7 +643,7 @@ class FinalAnalysisStage:
                 "generated_at": timestamp.isoformat(),
                 "stage_count": len(stage_summaries),
                 "stage_indices": [s.stage_index for s in stage_summaries],
-                "model": model,
+                "model": effective_model,
                 "estimated_tokens": estimate_tokens(response),
                 "mode": mode,
                 "multi_perspective_analysis": False,
@@ -538,8 +766,15 @@ _Final analysis generated by {model} ({timestamp})_
         self.manifest_manager.update_stage(manifest, "final", "running")
         self.manifest_manager.save_manifest(manifest)
 
-        output_dir = Path(manifest.input_path).parent / ".longtext"
-        output_dir.mkdir(exist_ok=True)
+        # Determine output directory from config or use default .longtext/
+        output_dir_config = config.get("output", {}).get("dir")
+        if output_dir_config:
+            # Use configured output directory
+            output_dir = Path(output_dir_config) / ".longtext"
+        else:
+            # Default: adjacent .longtext/ directory
+            output_dir = Path(manifest.input_path).parent / ".longtext"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             if multi_perspective:
@@ -552,6 +787,21 @@ _Final analysis generated by {model} ({timestamp})_
                 )
 
             final_analysis.metadata["mode"] = mode
+            if multi_perspective:
+                error_summary = final_analysis.metadata.setdefault("error_summary", {})
+                if isinstance(error_summary, dict):
+                    error_summary.setdefault(
+                        "multi_perspective",
+                        {
+                            "enabled": True,
+                            "selected_specialists": final_analysis.metadata.get(
+                                "selected_specialists", []
+                            ),
+                            "fallback_used": final_analysis.metadata.get(
+                                "fallback_used", False
+                            ),
+                        },
+                    )
 
             md_path, json_path = self._save_final_analysis(
                 final_analysis, manifest, output_dir, mode
@@ -570,6 +820,7 @@ _Final analysis generated by {model} ({timestamp})_
                     "output_md": md_path,
                     "output_json": json_path,
                     "multi_perspective": multi_perspective,
+                    "output_dir_used": str(output_dir),
                 },
             )
             manifest.status = "completed"

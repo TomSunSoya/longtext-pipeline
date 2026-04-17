@@ -69,6 +69,7 @@ temp_combined.txt
 
 # Local scratch / QA artifacts
 .claude/
+.claw/
 bench_f3_performance.py
 temp_append.txt
 tmp_test_backup.txt

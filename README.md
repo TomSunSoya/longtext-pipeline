@@ -14,12 +14,15 @@ A Python CLI tool for hierarchical analysis of super-long texts using LLMs.
 - **Hierarchical processing**: 5-stage pipeline (Ingest → Summarize → Stage → Final → Audit)
 - **Resumable**: SHA-256-based checkpoint/resume — pick up where you left off
 - **Continue-with-Partial**: Pipeline continues with available results when individual parts fail
+- **Active audit stage**: Hallucination, timeline, and quality checks with heuristic fallback when no API-backed auditor is available
 - **Token budget management**: Automatic context window validation and prompt truncation
 - **Streaming**: Real-time token streaming with progress callbacks
 - **Cross-process locking**: File-level locking prevents concurrent runs on the same input
+- **Batch processing**: Sequential or parallel multi-file execution via `longtext batch`, with per-input output namespaces when artifacts are redirected
 - **Observability**: Prometheus metrics, structured JSON logging, configurable log sinks
 - **Dual modes**: General analysis and relationship-focused analysis
 - **Multi-perspective**: Parallel specialist agents for richer final synthesis
+- **Multi-provider routing**: Optional provider registry, parallel dispatch, and ranked result selection
 - **Model-agnostic**: Any OpenAI-compatible API endpoint (OpenAI, OpenRouter, Ollama, vLLM, etc.)
 - **Docker-ready**: Multi-stage Dockerfile with non-root user
 
@@ -81,6 +84,10 @@ $env:LONGTEXT_MODEL_NAME="your-model-name"
 # Basic usage — analyze a text file
 longtext run input.txt
 
+# PDF or Word documents
+longtext run document.pdf
+longtext run report.docx
+
 # With a config file
 longtext run input.txt --config examples/config.general.yaml
 
@@ -95,6 +102,9 @@ longtext run input.txt --multi-perspective --agent-count 3
 
 # Control concurrency
 longtext run input.txt --max-workers 2
+
+# Process multiple files
+longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
 ```
 
 ### 3. Check results
@@ -103,8 +113,11 @@ longtext run input.txt --max-workers 2
 # View processing status
 longtext status input.txt
 
-# Read the final analysis
-cat .longtext/final_analysis.md
+# Read the final analysis (built-in default output layout)
+cat output/.longtext/final_analysis.md
+
+# If output.dir is customized, generated artifacts are written there instead
+cat /path/to/output/.longtext/final_analysis.md
 ```
 
 ## CLI Commands
@@ -117,7 +130,7 @@ Execute the full pipeline on an input file.
 longtext run <input-file> [OPTIONS]
 
 Arguments:
-  <input-file>                Path to input .txt or .md file
+  <input-file>                Path to input file (.txt, .md, .pdf, .docx)
 
 Options:
   --config, -c PATH           YAML config file
@@ -128,6 +141,20 @@ Options:
   --max-workers INT           Max concurrent workers (1-256)
   --help                      Show all options
 ```
+
+`longtext run` supports `.txt`, `.md`, `.pdf`, and `.docx` inputs. PDF and DOCX files are extracted to text before processing.
+
+### `longtext batch`
+
+Process multiple files with the same runtime options.
+
+```bash
+longtext batch "inputs/*.txt"
+longtext batch "inputs/*.txt" --parallel --batch-max-workers 4
+longtext batch "doc1.txt,doc2.txt,doc3.txt" --config config.yaml
+```
+
+Batch mode can run files sequentially or in parallel. Each file still goes through the same five-stage single-file pipeline.
 
 ### `longtext status`
 
@@ -147,20 +174,30 @@ longtext init [--dir PATH]
 
 ## Output Structure
 
-Processing creates a `.longtext/` directory alongside the input file:
+With the built-in defaults, generated artifacts are written to `./output/.longtext/`:
 
 ```
-.longtext/
+output/.longtext/
 ├── part_001.txt           # Split input chunks
 ├── part_002.txt
 ├── summary_001.md         # Per-chunk LLM summaries
 ├── summary_002.md
 ├── stage_001.md           # Aggregated stage summaries
 ├── final_analysis.md      # Final synthesized analysis
+└── metrics.prom           # Prometheus metrics
+```
+
+Manifest and lock files still remain next to the input file:
+
+```
+.longtext/
 ├── manifest.json          # Processing state & checkpoint data
-├── metrics.prom           # Prometheus metrics
 └── .locks/                # Cross-process lock files
 ```
+
+If `output.dir` is configured, single-file runs write generated artifacts to `<output.dir>/.longtext/` instead. In batch mode, each input gets its own namespaced subdirectory under the configured base output directory, for example `<output.dir>/report_a1b2c3d4/.longtext/`.
+
+Manifest and lock files still remain next to the input file because resume and `longtext status` are keyed off the input-local `.longtext/manifest.json`.
 
 ## Configuration
 
@@ -212,9 +249,10 @@ export LONGTEXT_LOG_FILE="./pipeline.log"
 
 Create `longtext.local.yaml` in the working directory for secrets and local provider settings. This file is auto-discovered and should not be committed.
 
-### Current limitation
+### Known caveats
 
-The runtime currently writes working files next to the input file in `.longtext/`. The `output` section remains in the config schema, but it is not yet enforced uniformly by every stage.
+- `output.dir` is honored by the standard pipeline stages for generated artifacts, but manifest and lock files still live beside the input file.
+- In batch mode, a shared explicit `output.dir` is safe for generated artifacts because each input gets a namespaced subdirectory under the configured base output directory.
 
 ## Modes
 
@@ -233,8 +271,6 @@ Entity and relationship-focused analysis for network mapping. Best for organizat
 ```bash
 longtext run transcript.txt --mode relationship
 ```
-
-Relationship mode is available today, but some prompt sets and warnings still treat it as experimental.
 
 ## Resume
 
@@ -336,7 +372,7 @@ docker compose run longtext run /data/input.txt
 3. **Summarize** generates summaries for each chunk via LLM (async, concurrent workers)
 4. **Stage** groups summaries (default 5 per group) and synthesizes (async)
 5. **Final** synthesizes all stage summaries into one analysis (async, optional multi-perspective)
-6. **Audit** post-processing quality check (placeholder in v1)
+6. **Audit** checks hallucinations, timeline consistency, and quality metrics, with offline heuristics as fallback
 7. **Manifest** tracks state throughout for resume capability
 
 ## Troubleshooting

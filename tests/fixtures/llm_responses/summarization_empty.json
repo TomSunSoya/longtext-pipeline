@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_003_summarization_empty",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 100,
+    "completion_tokens": 50,
+    "total_tokens": 150,
+    "timestamp": "2026-04-14T10:32:00Z",
+    "response": {
+        "content": "This document contains minimal content that was rapidly processed. The summary highlights the key structural elements noted during analysis.",
+        "finish_reason": "length",
+        "logprobs": null
+    }
+}

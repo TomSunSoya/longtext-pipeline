@@ -1,0 +1,28 @@
+{
+    "test_case_id": "overreach_high_01",
+    "original_text": "The current implementation handles files up to 1MB.",
+    "llm_generated_output": "Our system is the first to handle documents of arbitrary size.",
+    "hallucination_type": "overreach",
+    "severity": "high",
+    "expected_detection": true,
+    "detection_reason": "Unsubstantiated claim about being 'first' and 'arbitrary size'",
+    "detection_method": "claim_verification",
+    "verification": {
+        "overreach_type": "superlative_claim",
+        "original_claim": "Handles up to 1MB",
+        "exaggerated_claim": "First system for arbitrary size documents",
+        "claim_expansion": {
+            "first": true,
+            "arbitrary_size": true
+        },
+        "evidence_available": {
+            "first_system": false,
+            "arbitrary_size_support": false
+        }
+    },
+    "context": {
+        "input_length": 50,
+        "position_in_document": "Abstract",
+        "document_type": "Research Paper"
+    }
+}

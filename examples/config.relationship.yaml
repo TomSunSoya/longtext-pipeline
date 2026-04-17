@@ -1,13 +1,7 @@
-# Longtext Pipeline - Relationship Analysis Configuration (EXPERIMENTAL)
+# Longtext Pipeline - Relationship Analysis Configuration
 #
-# ⚠️  EXPERIMENTAL FUNCTIONALITY
 # This configuration is designed for entity relationship mapping and
-# connection-focused analysis. Use with caution and verify outputs carefully.
-#
-# This configuration differs from general analysis by:
-#   - Focused on entity extraction and relationship mapping
-#   - Optimized prompts for connection discovery
-#   - Network/cluster-oriented final synthesis
+# connection-focused analysis.
 #
 # Usage:
 #   longtext run <input-file> --config examples/config.relationship.yaml
@@ -208,7 +202,7 @@ logging:
   file: null
 
 # =============================================================================
-# EXPERIMENTAL FEATURES NOTES
+# RELATIONSHIP MODE NOTES
 # =============================================================================
 #
 # Relationship analysis is designed for:

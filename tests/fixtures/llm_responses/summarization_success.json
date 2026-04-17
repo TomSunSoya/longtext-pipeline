@@ -1,0 +1,13 @@
+{
+    "request_id": "resp_001_summarization_success",
+    "model": "gpt-4o-mini",
+    "prompt_tokens": 456,
+    "completion_tokens": 234,
+    "total_tokens": 690,
+    "timestamp": "2026-04-14T10:30:15Z",
+    "response": {
+        "content": "This chunk covers the introduction and overview section of the document.\n\nKey points:\n1. Document purpose: To provide a comprehensive analysis of the subject matter.\n2. Target audience: Researchers and analysts working with long-form text.\n3. Methodology: Hierarchical analysis using LLM-based summarization.\n\nThe introduction establishes the framework for the analysis and outlines the expected structure of the final output. It emphasizes the importance of proper document decomposition for effective long-context processing.",
+        "finish_reason": "stop",
+        "logprobs": null
+    }
+}

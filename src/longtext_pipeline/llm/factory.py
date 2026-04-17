@@ -25,8 +25,8 @@ def get_llm_client(
     """Create an LLM client instance based on configuration.
 
     This factory function creates the appropriate LLM client based on the
-    provided configuration. For MVP, only OpenAI-compatible clients are
-    supported, but the interface is designed for easy provider expansion.
+    provided configuration. The current runtime uses OpenAI-compatible
+    clients, and the interface is designed for easy provider expansion.
 
     Configuration precedence (highest to lowest):
     1. Explicit function arguments
@@ -48,7 +48,7 @@ def get_llm_client(
         temperature: Temperature override (default: from config or 0.7)
 
     Returns:
-        Configured LLMClient instance (OpenAICompatibleClient for MVP)
+        Configured LLMClient instance
 
     Raises:
         ValueError: If an unsupported provider is specified
@@ -105,11 +105,10 @@ def get_llm_client(
         temperature if temperature is not None else model_config.get("temperature", 0.7)
     )
 
-    # Determine provider (default to "openai" for MVP)
+    # Determine provider (default to "openai")
     provider = model_config.get("provider", "openai").lower()
 
     # Create appropriate client based on provider
-    # MVP only supports OpenAI-compatible providers
     if provider in ("openai", "openrouter", "ollama", "vllm"):
         return OpenAICompatibleClient(
             model=resolved_model,
@@ -121,5 +120,6 @@ def get_llm_client(
     else:
         raise ValueError(
             f"Unsupported LLM provider: '{provider}'. "
-            f"MVP supports only OpenAI-compatible providers (openai, openrouter, ollama, vllm)."
+            "This runtime supports OpenAI-compatible providers "
+            "(openai, openrouter, ollama, vllm)."
         )

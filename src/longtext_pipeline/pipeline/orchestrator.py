@@ -80,6 +80,42 @@ class LongtextPipeline:
             return
         manifest.status = "completed"
 
+    @staticmethod
+    def _is_audit_enabled(config: dict) -> bool:
+        """Resolve audit enablement from primary and legacy compatibility flags."""
+        stage_enabled = config.get("stages", {}).get("audit", {}).get("enabled", True)
+        legacy_enabled = config.get("pipeline", {}).get("audit_enabled", True)
+        return bool(stage_enabled and legacy_enabled)
+
+    @staticmethod
+    def _build_audit_stats(audit_data: dict) -> dict:
+        """Normalize audit results into manifest-friendly stats."""
+        hallucination_info = audit_data.get("hallucination_detection", {})
+        timeline_info = audit_data.get("timeline_verification", {})
+        issues_found = audit_data.get("issues_found")
+        if issues_found is None:
+            issues_found = len(audit_data.get("detected_hallucinations", [])) + int(
+                timeline_info.get("timeline_anomalies", 0)
+            )
+
+        confidence_score = audit_data.get("confidence_score")
+        if confidence_score is None:
+            confidence_score = hallucination_info.get("confidence_score", 0.0)
+
+        return {
+            "issues_found": issues_found,
+            "confidence_score": confidence_score,
+            "recommendations": audit_data.get("recommendations", []),
+            "checked_items": audit_data.get("checked_items", []),
+            "report_path": audit_data.get("report_path"),
+            "hallucination_detection": hallucination_info,
+            "timeline_verification": timeline_info,
+            "source_document_available": audit_data.get(
+                "source_document_available", False
+            ),
+            "quality_scoring": audit_data.get("quality_scoring", {}),
+        }
+
     def run(
         self,
         input_path: str,
@@ -455,9 +491,7 @@ class LongtextPipeline:
                 # STAGE 5: AUDIT (conditional)
                 current_stage = "audit"
                 audit_result = None
-                audit_enabled = (
-                    config.get("stages", {}).get("audit", {}).get("enabled", False)
-                )
+                audit_enabled = self._is_audit_enabled(config)
                 if audit_enabled and (not resume or "audit" not in completed_stages):
                     logger.info("Starting %s stage", current_stage)
                     audit_result = self._execute_stage_with_error_handling(
@@ -467,30 +501,65 @@ class LongtextPipeline:
                     )
 
                     if audit_result.success and audit_result.data is not None:
-                        logger.info("Audit stage completed successfully")
+                        audit_data = audit_result.data
+                        audit_status = audit_data.get("status", "successful")
+                        audit_stats = self._build_audit_stats(audit_data)
+
                         for warning in audit_result.warnings or []:
                             self.error_aggregator.add_warning(current_stage, warning)
 
-                        # Store audit result in manifest with findings
-                        audit_data = audit_result.data
-                        self.manifest_manager.update_stage(
-                            manifest,
-                            "audit",
+                        if audit_status in {
                             "successful",
-                            output_file="audit_report.md",
-                            stats={
-                                "issues_found": audit_data.get("issues_found", 0),
-                                "confidence_score": audit_data.get(
-                                    "confidence_score", 0.0
-                                ),
-                                "recommendations": audit_data.get(
-                                    "recommendations", []
-                                ),
-                                "checked_items": audit_data.get("checked_items", []),
-                                "report_path": audit_data.get("report_path"),
-                            },
-                        )
-                        self._mark_manifest_completed_unless_degraded(manifest)
+                            "successful_with_warnings",
+                        }:
+                            logger.info(
+                                "Audit stage completed with status %s", audit_status
+                            )
+                            if audit_status == "successful_with_warnings":
+                                issues_found = int(audit_stats.get("issues_found", 0))
+                                self.error_aggregator.add_warning(
+                                    current_stage,
+                                    f"Audit detected {issues_found} issue(s)",
+                                )
+
+                            self.manifest_manager.update_stage(
+                                manifest,
+                                "audit",
+                                audit_status,
+                                output_file="audit_report.md",
+                                stats=audit_stats,
+                            )
+                            self._mark_manifest_completed_unless_degraded(manifest)
+                        elif audit_status == "skipped":
+                            logger.info("Audit stage was skipped")
+                            self.manifest_manager.update_stage(
+                                manifest,
+                                "audit",
+                                "skipped",
+                                output_file="audit_report.md",
+                                stats=audit_stats,
+                            )
+                            self._mark_manifest_completed_unless_degraded(manifest)
+                        else:
+                            logger.warning("Audit stage reported failure")
+                            audit_errors = audit_data.get("errors", [])
+                            if audit_errors:
+                                self.error_aggregator.add_errors(
+                                    current_stage, audit_errors
+                                )
+                            error_message = (
+                                "; ".join(audit_errors)
+                                or audit_data.get("message")
+                                or "Audit stage failed"
+                            )
+                            self.manifest_manager.update_stage(
+                                manifest,
+                                "audit",
+                                "failed",
+                                output_file="audit_report.md",
+                                error=error_message,
+                                stats=audit_stats,
+                            )
                     else:
                         logger.warning(
                             "Audit stage encountered errors or produced partial results"
@@ -532,6 +601,14 @@ class LongtextPipeline:
                             output_file="audit_report.md",
                         )
                         self._mark_manifest_completed_unless_degraded(manifest)
+                else:
+                    logger.info("Audit stage disabled by configuration")
+                    self.manifest_manager.update_stage(
+                        manifest,
+                        "audit",
+                        "skipped",
+                    )
+                    self._mark_manifest_completed_unless_degraded(manifest)
 
             except Exception as e:
                 error_msg = f"{current_stage} stage failed with error: {str(e)}"

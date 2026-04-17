@@ -1649,18 +1649,54 @@ class AuditStage:
         }
         return [w for w in words if w not in stop_words and len(w) > 2]
 
-    def _build_placeholder_result(self, mode: str) -> dict[str, Any]:
-        """Return the legacy placeholder response used by direct audit tests."""
+    def _build_missing_analysis_result(
+        self, mode: str, error_message: str
+    ) -> dict[str, Any]:
+        """Return a deterministic failure payload when audit prerequisites are missing."""
+        timestamp = datetime.now().isoformat()
         return {
-            "status": "skipped",
+            "status": "failed",
             "stage": "audit",
             "mode": mode,
-            "message": "Audit functionality is experimental in MVP and was skipped.",
+            "timestamp": timestamp,
+            "message": error_message,
             "checked_items": 0,
             "issues_found": 0,
             "confidence_score": None,
             "audited_files": [],
-            "recommendations": [],
+            "recommendations": ["Run the final analysis stage before invoking audit."],
+            "errors": [error_message],
+            "hallucination_detection": {
+                "total_claims": 0,
+                "verified_claims": 0,
+                "hallucinated_claims": 0,
+                "confidence_score": 0,
+                "quality_assessment": "unavailable",
+            },
+            "timeline_verification": {
+                "total_events": 0,
+                "verified_events": 0,
+                "timeline_anomalies": 0,
+                "chronological_issues": 0,
+                "conflicting_timestamps": 0,
+                "timeline_score": 0,
+                "quality_assessment": "unavailable",
+            },
+            "detected_hallucinations": [],
+            "detected_timeline_anomalies": [],
+            "source_temporal_entities": [],
+            "evidence_trace": [],
+            "enhanced_evidence_trace": [],
+            "source_document_available": False,
+            "detailed_audit_report": "",
+            "quality_scoring": {
+                "composite_score": 0.0,
+                "confidence_score": 0.0,
+                "quality_assessment": "unavailable",
+                "metrics": {},
+                "metrics_summary": error_message,
+                "timestamp": timestamp,
+            },
         }
 
     def _create_claim(self, claim_text: str) -> HallucinationClaim:
@@ -1874,20 +1910,23 @@ class AuditStage:
         """
         logger.info(f"Starting audit stage using mode: {mode}")
 
-        if analysis_objects is None:
-            logger.warning("Audit functionality is experimental in MVP")
-            logger.warning("Skipping audit for mode: %s", mode)
-            logger.warning("Analysis quality checks were not performed")
+        if mode not in ("general", "relationship"):
+            raise ValueError(
+                f"Invalid mode: '{mode}'. Must be 'general' or 'relationship'."
+            )
 
-            placeholder_error = "Audit functionality deferred to v2 - placeholder only"
+        if analysis_objects is None:
+            missing_analysis_error = (
+                "Audit requires final analysis output but none was provided."
+            )
+            logger.error(missing_analysis_error)
             self.manifest_manager.update_stage(
                 manifest,
                 "audit",
-                "skipped",
-                error=placeholder_error,
+                "failed",
+                error=missing_analysis_error,
             )
-            manifest.status = "skipped"
-            return self._build_placeholder_result(mode)
+            return self._build_missing_analysis_result(mode, missing_analysis_error)
 
         # Read the original source document from the manifest
         source_document = ""

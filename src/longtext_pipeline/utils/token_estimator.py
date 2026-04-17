@@ -1,6 +1,6 @@
 """
 Token estimation utilities for cost management.
-Provides approximate token counting based on word counts (MVP approach).
+Provides approximate token counting based on lightweight heuristics.
 """
 
 import re
@@ -12,7 +12,7 @@ def estimate_tokens(text: str) -> int:
     """
     Estimate token count from text using word-based approximation.
 
-    For MVP: Uses simple heuristic where ~4-5 characters = 1 token,
+    Uses a simple heuristic where ~4-5 characters = 1 token,
     or ~0.75 words = 1 token. This is a rough approximation suitable
     for initial cost estimates and chunk sizing decisions.
 

@@ -249,7 +249,7 @@ export LONGTEXT_LOG_FILE="./pipeline.log"
 
 Create `longtext.local.yaml` in the working directory for secrets and local provider settings. This file is auto-discovered and should not be committed.
 
-### Known caveats
+### Operational Notes
 
 - `output.dir` is honored by the standard pipeline stages for generated artifacts, but manifest and lock files still live beside the input file.
 - In batch mode, a shared explicit `output.dir` is safe for generated artifacts because each input gets a namespaced subdirectory under the configured base output directory.

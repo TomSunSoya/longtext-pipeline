@@ -3,7 +3,7 @@ Ingest stage implementation for the longtext pipeline.
 
 This module provides the IngestStage class for reading input files,
 cleaning text, and splitting content into manageable parts for downstream
-processing. Implements the input processing pipeline for MVP with PDF and DOCX support.
+processing. Implements the input processing pipeline with PDF and DOCX support.
 """
 
 import logging

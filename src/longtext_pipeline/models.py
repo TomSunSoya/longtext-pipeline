@@ -16,7 +16,8 @@ class StageInfo:
 
     Attributes:
         name: Stage name (e.g., 'ingest', 'summarize', 'stage', 'final', 'audit')
-        status: Current status ('not_started', 'running', 'successful', 'failed', 'skipped')
+        status: Current status ('not_started', 'running', 'successful',
+            'successful_with_warnings', 'failed', 'skipped')
         input_file: Path to input file for this stage
         output_file: Path to output file for this stage
         timestamp: When this stage was processed

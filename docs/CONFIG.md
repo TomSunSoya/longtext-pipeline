@@ -137,9 +137,13 @@ Holds source-level settings such as encoding and related preprocessing controls.
 Current notable keys:
 
 - `allow_resume`
-- `audit_enabled`
 - `max_workers`
 - `specialist_count`
+
+Compatibility note:
+
+- `stages.audit.enabled` is the primary audit toggle.
+- `pipeline.audit_enabled` is still honored as a legacy compatibility flag and can also disable audit.
 
 ### `ocr`
 

@@ -559,6 +559,7 @@ class TestManifestIntegration:
             assert stage_info.name == stage_name
             assert stage_info.status in [
                 "successful",
+                "successful_with_warnings",
                 "failed",
                 "not_started",
                 "running",

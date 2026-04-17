@@ -474,6 +474,7 @@ class TestManifestManagement:
                 "not_started",
                 "running",
                 "successful",
+                "successful_with_warnings",
                 "failed",
                 "skipped",
             ]

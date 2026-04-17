@@ -146,7 +146,7 @@ For batch runs with a custom `output.dir`:
 - each input gets a namespaced output base such as `<output.dir>/report_a1b2c3d4/.longtext/`
 - manifest and `.locks/` still remain beside each source input file
 
-## Current caveats
+## Operational Notes
 
-- Audit is active and no longer just a skipped placeholder stage.
+- Audit runs as an active verification stage when enabled and falls back to offline heuristics if no API-backed auditor can be created.
 - `status` is manifest-based, so it follows the input-local manifest rather than the redirected artifact directory.

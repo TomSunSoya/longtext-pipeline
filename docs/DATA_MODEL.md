@@ -36,10 +36,10 @@ Stores pipeline state and enables resumable execution. Located at `.longtext/man
   "total_parts": "integer, total number of parts after ingestion",
   "total_stages": "integer, total number of stages after grouping",
   "estimated_tokens": "integer [optional], rough token count of input",
-  "status": "string, overall status ('not_started', 'ingesting', 'summarizing', 'staging', 'finalizing', 'completed', 'failed', 'partial_success')",
+  "status": "string, overall status ('not_started', 'running', 'completed', 'completed_with_issues', 'partial_success', 'failed', 'interrupted')",
   "stages": {
     "ingest": {
-      "status": "string ('not_started', 'running', 'successful', 'failed')",
+      "status": "string ('not_started', 'running', 'successful', 'successful_with_warnings', 'failed')",
       "completed_at": "string [optional], when stage completed",
       "error": "string [optional], error message if failed",
       "stats": {
@@ -48,7 +48,7 @@ Stores pipeline state and enables resumable execution. Located at `.longtext/man
       }
     },
     "summarize": {
-      "status": "string ('not_started', 'running', 'successful', 'failed', 'skipped')",
+      "status": "string ('not_started', 'running', 'successful', 'successful_with_warnings', 'failed', 'skipped')",
       "completed_at": "string [optional], timestamp",
       "error": "string [optional], error message",
       "stats": {
@@ -64,7 +64,7 @@ Stores pipeline state and enables resumable execution. Located at `.longtext/man
       }
     },
     "stage": {
-      "status": "string ('not_started', 'running', 'successful', 'failed', 'skipped')",
+      "status": "string ('not_started', 'running', 'successful', 'successful_with_warnings', 'failed', 'skipped')",
       "completed_at": "string [optional], timestamp",
       "error": "string [optional], error message",
       "stats": {
@@ -80,7 +80,7 @@ Stores pipeline state and enables resumable execution. Located at `.longtext/man
       }
     },
     "final": {
-      "status": "string ('not_started', 'running', 'successful', 'failed', 'skipped')",
+      "status": "string ('not_started', 'running', 'successful', 'successful_with_warnings', 'failed', 'skipped')",
       "completed_at": "string [optional], timestamp",
       "error": "string [optional], error message",
       "stats": {

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "longtext-pipeline"
-version = "0.1.1"
+version = "1.0.0"
 description = "A Python CLI tool for hierarchical analysis of super-long texts"
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,7 +14,7 @@ authors = [
 requires-python = ">=3.10"
 keywords = ["llm", "cli", "summarization", "long-context", "analysis", "openai-compatible"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",

@@ -117,8 +117,8 @@ stages:
   # Post-processing quality check for hallucinations and errors.
   audit:
     # Enable or disable the audit stage.
-    # Disabled by default as this is experimental functionality.
-    enabled: false
+    # Enabled by default for release-grade verification.
+    enabled: true
 
     # Path to the audit prompt template.
     # Reviews output for factual consistency and logical coherence.
@@ -196,7 +196,7 @@ pipeline:
   # Enable post-processing audit phase.
   # Works in conjunction with stages.audit.enabled.
   # Audits final output for consistency and potential hallucinations.
-  audit_enabled: false
+  audit_enabled: true
 
   # Maximum number of concurrent workers for parallel operations.
   #   - 1-2: Conservative, minimal resource usage

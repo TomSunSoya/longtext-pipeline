@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-17
+
+### Changed
+- Promoted the project to a stable `1.0.0` release with synchronized package metadata and CLI versioning
+- Removed the remaining experimental wording from relationship-mode runtime paths and user-facing docs
+- Updated general, relationship, default, and multi-agent example configs to enable the active audit stage by default
+
+### Fixed
+- Audit now fails explicitly when invoked without final-analysis output instead of returning a placeholder skipped result
+- Orchestrator now preserves the audit stage's real runtime status, including `successful_with_warnings`
+- Resume helpers now treat `successful_with_warnings` as a completed stage
+- Legacy `pipeline.audit_enabled` compatibility flags are honored when deciding whether to run audit
+
 ## [0.1.1] - 2026-04-13
 
 ### Fixed
@@ -41,5 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dev dependencies: pytest, pytest-cov
 - Entry point: `longtext` CLI command
 
-[Unreleased]: https://github.com/TomSunSoya/longtext-pipeline/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/TomSunSoya/longtext-pipeline/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/TomSunSoya/longtext-pipeline/compare/v0.1.1...v1.0.0
+[0.1.1]: https://github.com/TomSunSoya/longtext-pipeline/releases/tag/v0.1.1
 [0.1.0]: https://github.com/TomSunSoya/longtext-pipeline/releases/tag/v0.1.0

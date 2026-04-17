@@ -32,7 +32,7 @@ class StageSynthesisStage:
 
     The stage synthesis stage processes groups of part summaries, combining
     them into cohesive stage-level syntheses. It supports both General and
-    Relationship modes (experimental) via different prompt templates. Implements
+    Relationship modes via different prompt templates. Implements
     Continue-with-Partial error handling to maximize throughput despite
     individual group failures.
     """
@@ -259,9 +259,6 @@ _Stage synthesized by {model} ({timestamp})_
             raise ValueError(
                 f"Invalid mode: '{mode}'. Must be 'general' or 'relationship'."
             )
-
-        if mode == "relationship":
-            logger.warning("Relationship-focused stage synthesis mode is experimental")
 
         self.manifest_manager.update_stage(manifest, "stage", "running")
 

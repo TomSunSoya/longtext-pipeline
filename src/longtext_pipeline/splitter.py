@@ -17,7 +17,7 @@ class TextSplitter:
     """Splits text into parts by token count with overlap support.
 
     This splitter uses a simple token estimation approximation (words/3)
-    for MVP. It preserves context between chunks using overlap and handles
+    for the current runtime. It preserves context between chunks using overlap and handles
     edge cases like empty input, tiny input, and very long sections.
 
     Attributes:

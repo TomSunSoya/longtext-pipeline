@@ -28,7 +28,7 @@ def _make_manifest(input_path: str) -> Manifest:
             "summarize": StageInfo(name="summarize", status="not_started"),
             "stage": StageInfo(name="stage", status="not_started"),
             "final": StageInfo(name="final", status="not_started"),
-            "audit": StageInfo(name="audit", status="skipped"),
+            "audit": StageInfo(name="audit", status="not_started"),
         },
         created_at=now,
         updated_at=now,
@@ -126,6 +126,59 @@ def test_run_propagates_output_dir_override_to_stage_config(tmp_path, monkeypatc
 
     assert result.status == "completed"
     assert seen_output_dir["value"] == str(output_dir)
+
+
+def test_run_uses_legacy_pipeline_audit_flag_to_disable_audit(tmp_path):
+    pipeline = LongtextPipeline()
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("body", encoding="utf-8")
+    part = Part(index=0, content="body", token_count=1)
+    summary = Summary(part_index=0, content="summary")
+    stage = StageSummary(stage_index=0, summaries=[summary], synthesis="stage")
+
+    class _Lock:
+        lock_path = "dummy.lock"
+
+        def release(self):
+            return None
+
+    with patch.object(
+        pipeline,
+        "_load_and_validate_config",
+        return_value={
+            "stages": {"audit": {"enabled": True}},
+            "pipeline": {"audit_enabled": False},
+        },
+    ):
+        with patch.object(pipeline, "_acquire_run_lock", return_value=_Lock()):
+            with patch(
+                "src.longtext_pipeline.pipeline.orchestrator.write_metrics_to_file",
+                lambda _: None,
+            ):
+                with patch.object(pipeline, "_run_ingest_stage", return_value=[part]):
+                    with patch.object(
+                        pipeline, "_run_summarize_stage", return_value=[summary]
+                    ):
+                        with patch.object(
+                            pipeline,
+                            "_run_stage_synthesis_stage",
+                            return_value=[stage],
+                        ):
+                            with patch.object(
+                                pipeline,
+                                "_run_final_analysis_stage",
+                                return_value=FinalAnalysis(
+                                    status="completed",
+                                    stages=[stage],
+                                    final_result="final",
+                                    metadata={},
+                                ),
+                            ):
+                                result = pipeline.run(str(input_file))
+
+    manifest = pipeline.manifest_manager.load_manifest(str(input_file))
+    assert result.status == "completed"
+    assert manifest.stages["audit"].status == "skipped"
 
 
 def test_load_and_validate_config_updates_relationship_prompts():

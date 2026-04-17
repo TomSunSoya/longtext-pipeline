@@ -38,7 +38,7 @@ stages:
     prompt_template: "prompts/final_general.txt"    # Final analysis prompt
 
   audit:
-    enabled: false         # Enable post-processing audit
+    enabled: true          # Enable post-processing audit
     prompt_template: "prompts/audit_general.txt"    # Audit prompt file
 
 prompts:
@@ -59,7 +59,7 @@ input:
 
 pipeline:
   allow_resume: true       # Enable resumable processing
-  audit_enabled: false     # Enable post-processing audit phase
+  audit_enabled: true      # Legacy compatibility flag for audit enablement
   max_workers: 4           # Max concurrent workers for parallel operations
 
 logging:

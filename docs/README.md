@@ -5,8 +5,8 @@ Start with the repository [README](../README.md) for installation and quickstart
 ## Runtime and contributor docs
 
 - [CLI reference](CLI.md) — commands, flags, exit codes, and generated project files
-- [Configuration reference](CONFIG.md) — config schema, precedence, environment overrides, and current limitations
-- [Architecture overview](ARCHITECTURE.md) — module boundaries, data flow, and operational caveats
+- [Configuration reference](CONFIG.md) — config schema, precedence, environment overrides, and runtime notes
+- [Architecture overview](ARCHITECTURE.md) — module boundaries, data flow, and operational notes
 - [Data model notes](DATA_MODEL.md) — manifest and pipeline data structures
 - [Examples guide](../examples/README.md) — which example config to use for each scenario
 - [Contributing guide](../CONTRIBUTING.md) — local setup, quality gates, and PR expectations

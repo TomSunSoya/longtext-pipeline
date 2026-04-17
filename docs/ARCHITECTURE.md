@@ -125,9 +125,9 @@ When batch redirects generated artifacts through `output.dir`, the CLI assigns a
 - final analysis can optionally fan out into multiple specialist analyses
 - `longtext batch` can process files sequentially or in parallel across independent single-file runs
 
-## Operational caveats
+## Operational Notes
 
 - `LongtextPipeline.run()` now validates `.txt`, `.md`, `.pdf`, and `.docx`, matching the ingest layer and CLI surface.
-- Audit is active, not a placeholder, but it may fall back to offline heuristics when no API-backed auditor can be created.
+- Audit is an active stage and may fall back to offline heuristics when no API-backed auditor can be created.
 - Batch runs namespace redirected artifacts per input file, so different inputs do not mix generated stage files under one shared output base.
 - Editable installs can hide packaging bugs, so release validation should include a wheel or non-editable install path to confirm prompt files are packaged.

@@ -55,7 +55,7 @@ stages:
 
   # Audit stage performs quality checks (optional)
   audit:
-    enabled: false
+    enabled: true
     prompt_template: "prompts/audit_general.txt"
 
 # =============================================================================
@@ -88,7 +88,7 @@ input:
 # =============================================================================
 pipeline:
   allow_resume: true
-  audit_enabled: false
+  audit_enabled: true
   max_workers: 4
 
 # =============================================================================

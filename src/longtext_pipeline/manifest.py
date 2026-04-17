@@ -189,9 +189,7 @@ class ManifestManager:
             "summarize": StageInfo(name="summarize", status="not_started"),
             "stage": StageInfo(name="stage", status="not_started"),
             "final": StageInfo(name="final", status="not_started"),
-            "audit": StageInfo(
-                name="audit", status="skipped"
-            ),  # Audit skipped by default
+            "audit": StageInfo(name="audit", status="not_started"),
         }
 
         manifest = Manifest(
@@ -281,7 +279,8 @@ class ManifestManager:
         Args:
             manifest: Manifest to update
             stage_name: Name of stage to update
-            status: New status ('not_started', 'running', 'successful', 'failed', 'skipped')
+            status: New status ('not_started', 'running', 'successful',
+                'successful_with_warnings', 'failed', 'skipped')
             output_file: Optional path to output file
             error: Optional error message if stage failed
             stats: Optional stage-specific statistics
@@ -296,7 +295,7 @@ class ManifestManager:
         stage.stats = stats if stats is not None else stage.stats
         stage.timestamp = datetime.now()
         manifest.updated_at = datetime.now()
-        if status not in {"successful", "successful_with_warnings"}:
+        if status not in {"successful", "successful_with_warnings", "skipped"}:
             manifest.status = status
 
     def is_stage_complete(self, manifest: Manifest, stage_name: str) -> bool:
@@ -308,12 +307,15 @@ class ManifestManager:
             stage_name: Name of stage to check
 
         Returns:
-            True if stage status is 'successful'
+            True if stage status is a completed success state
         """
         if stage_name not in manifest.stages:
             return False
 
-        return manifest.stages[stage_name].status == "successful"
+        return manifest.stages[stage_name].status in {
+            "successful",
+            "successful_with_warnings",
+        }
 
     def should_resume(self, manifest: Manifest, input_hash: str) -> bool:
         """
@@ -355,7 +357,7 @@ class ManifestManager:
         return [
             name
             for name, stage in manifest.stages.items()
-            if stage.status == "successful"
+            if stage.status in {"successful", "successful_with_warnings"}
         ]
 
     def create_from_existing(

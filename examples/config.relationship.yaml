@@ -109,7 +109,7 @@ stages:
   audit:
     # Enable audit stage (recommended for relationship analysis due to
     # higher risk of spurious relationship inference).
-    enabled: false
+    enabled: true
 
     # Relationship-focused audit prompt.
     # Specifically checks for:
@@ -180,7 +180,7 @@ pipeline:
   # Enable post-processing audit.
   # RECOMMENDED: true for relationship analysis due to higher
   # hallucination risk in entity relationship inference.
-  audit_enabled: false
+  audit_enabled: true
 
   # Max concurrent workers.
   # Kept conservative (4) as relationship extraction requires

@@ -154,7 +154,7 @@ class ConfigError(Exception):
     """Raised when configuration loading or validation fails."""
 
 
-# Default configuration values (MVP)
+# Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
     "model": {
         "provider": "openai",
@@ -418,7 +418,7 @@ def validate_config(config: dict) -> bool:
 
     Notes:
         - Unknown keys at any level generate warnings but do not fail
-        - Missing required fields use defaults (no required fields in MVP)
+        - Missing required fields use defaults when allowed by the runtime schema
         - Type checking is minimal (config is validated at usage time)
     """
     # Known top-level keys
